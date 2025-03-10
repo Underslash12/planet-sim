@@ -50,13 +50,20 @@ impl Vertex {
     }
 }
 
-// temporary vertex data
+// a simple pentagon
 const VERTICES: &[Vertex] = &[
-    Vertex { position: [0.0, 2.0 * 0.5, 0.0], color: [1.0, 0.0, 0.0] },
-    // Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
-    // Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
-    Vertex { position: [2.0 * -0.433, 2.0 * -0.25, 0.0], color: [0.0, 1.0, 0.0] },
-    Vertex { position: [2.0 * 0.433, 2.0 * -0.25, 0.0], color: [0.0, 0.0, 1.0] },
+    Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0] }, // A
+    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.4, 0.6, 0.0] }, // B
+    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.0, 0.8, 0.2] }, // C
+    Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.0, 0.2, 0.8] }, // D
+    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [0.4, 0.0, 0.6] }, // E
+];
+
+// vertex buffer indices
+const INDICES: &[u16] = &[
+    0, 1, 4,
+    1, 2, 4,
+    2, 3, 4,
 ];
 
 
@@ -71,6 +78,8 @@ struct State<'a> {
     render_pipeline: wgpu::RenderPipeline,
     num_vertices: u32,
     vertex_buffer: wgpu::Buffer,
+    num_indices: u32,
+    index_buffer: wgpu::Buffer, 
 }
 
 
@@ -202,13 +211,24 @@ impl<'a> State<'a> {
 
         // want to store the number of vertices for rendering
         let num_vertices = VERTICES.len() as u32;
-
         // create a vertex buffer for, you guessed it, the vertices
         let vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
                 contents: bytemuck::cast_slice(VERTICES),
                 usage: wgpu::BufferUsages::VERTEX,
+            }
+        );
+
+        // number of indices
+        let num_indices = INDICES.len() as u32;
+        // index buffer to reuse the vertices
+        // though an index buffer still has some waste, it wastes 2 bytes per vertex instead of sizeof(vec3f) = 12 bytes per vertex
+        let index_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Index Buffer"),
+                contents: bytemuck::cast_slice(INDICES),
+                usage: wgpu::BufferUsages::INDEX,
             }
         );
 
@@ -223,6 +243,8 @@ impl<'a> State<'a> {
             render_pipeline,
             num_vertices,
             vertex_buffer,
+            num_indices,
+            index_buffer,
         }
     }
 
@@ -291,9 +313,15 @@ impl<'a> State<'a> {
             render_pass.set_pipeline(&self.render_pipeline); 
             // need to actually assign the buffer we created to the renderer (since it needs a specific slot)
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            // as with the vertex buffer, we have to set the active index buffer, but this time there is only one slot (hence active)
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); 
+            // instead of using draw, since we are using an index buffer, we have to use draw_indexed
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+            
             // draw 1 instance of all of our vertices
-            render_pass.draw(0..self.num_vertices, 0..1);   
+            // render_pass.draw(0..self.num_vertices, 0..1);   
             // render_pass.draw(0..3, 0..1); 
+            
         }
         
     
