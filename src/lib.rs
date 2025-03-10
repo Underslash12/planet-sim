@@ -10,6 +10,55 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+use wgpu::util::DeviceExt;
+
+
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    color: [f32; 3],
+}
+
+impl Vertex {
+    // get the vertexbufferlayout associated with the Vertex struct
+    // the vertexbufferlayout is just how each vertex is laid out within the buffer
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            // the attributes specify how each vertex should be further divided
+            attributes: &[
+                // this attribute corresponds to the position
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                // and this attribute, which corresponds to the color, is offset by the size of the previous attribute
+                // the shader location lets wgsl know what @location(i) refers to, so in this case @location(1) refers to the vec3f field for color
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x3,
+                }
+            ]
+            // could use the following wgpu macro to auto-generate the attributes
+            // attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+        }
+    }
+}
+
+// temporary vertex data
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [0.0, 2.0 * 0.5, 0.0], color: [1.0, 0.0, 0.0] },
+    // Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
+    // Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+    Vertex { position: [2.0 * -0.433, 2.0 * -0.25, 0.0], color: [0.0, 1.0, 0.0] },
+    Vertex { position: [2.0 * 0.433, 2.0 * -0.25, 0.0], color: [0.0, 0.0, 1.0] },
+];
+
 
 // webgpu state including the surface, device, and render pipeline
 struct State<'a> {
@@ -20,6 +69,8 @@ struct State<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     window: &'a Window,
     render_pipeline: wgpu::RenderPipeline,
+    num_vertices: u32,
+    vertex_buffer: wgpu::Buffer,
 }
 
 
@@ -112,7 +163,9 @@ impl<'a> State<'a> {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[],
+                buffers: &[
+                    Vertex::desc(),
+                ],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -147,6 +200,18 @@ impl<'a> State<'a> {
             cache: None, 
         });
 
+        // want to store the number of vertices for rendering
+        let num_vertices = VERTICES.len() as u32;
+
+        // create a vertex buffer for, you guessed it, the vertices
+        let vertex_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(VERTICES),
+                usage: wgpu::BufferUsages::VERTEX,
+            }
+        );
+
         // create the state
         State {
             surface,
@@ -156,6 +221,8 @@ impl<'a> State<'a> {
             size,
             window,
             render_pipeline,
+            num_vertices,
+            vertex_buffer,
         }
     }
 
@@ -221,8 +288,12 @@ impl<'a> State<'a> {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline); // 2.
-            render_pass.draw(0..3, 0..1); // 3.
+            render_pass.set_pipeline(&self.render_pipeline); 
+            // need to actually assign the buffer we created to the renderer (since it needs a specific slot)
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            // draw 1 instance of all of our vertices
+            render_pass.draw(0..self.num_vertices, 0..1);   
+            // render_pass.draw(0..3, 0..1); 
         }
         
     
@@ -256,7 +327,7 @@ pub async fn run() {
         // Winit prevents sizing with CSS, so we have to set
         // the size manually when on web.
         use winit::dpi::PhysicalSize;
-        let _ = window.request_inner_size(PhysicalSize::new(450, 400));
+        let _ = window.request_inner_size(PhysicalSize::new(640, 640));
         
         use winit::platform::web::WindowExtWebSys;
         web_sys::window()
