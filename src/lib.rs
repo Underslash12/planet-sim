@@ -1,20 +1,17 @@
 // lib.rs
 
-#[cfg(target_arch="wasm32")]
-use wasm_bindgen::prelude::*;
-
 use log::{error, info};
-
-use cgmath::prelude::*;
 
 use winit::{
     dpi::PhysicalSize, event::*, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
 };
-
 use wgpu::util::DeviceExt;
+use cgmath::prelude::*;
+
+#[cfg(target_arch="wasm32")]
+use wasm_bindgen::prelude::*;
 
 mod texture;
-
 
 
 #[repr(C)]
@@ -288,6 +285,7 @@ impl CameraController {
 
 // webgpu state including the surface, device, and render pipeline
 struct State<'a> {
+    frame: usize,
     surface: wgpu::Surface<'a>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -376,7 +374,7 @@ impl<'a> State<'a> {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: wgpu::PresentMode::AutoVsync,
+            present_mode: wgpu::PresentMode::Immediate,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -611,6 +609,7 @@ impl<'a> State<'a> {
             
         // create the state
         State {
+            frame: 0,
             surface,
             device,
             queue,
@@ -655,6 +654,11 @@ impl<'a> State<'a> {
 
     // update the state
     fn update(&mut self) {
+        self.frame += 1;
+        if self.frame % 100 == 0 {
+            println!("Frame: {}", self.frame);
+        }
+
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
