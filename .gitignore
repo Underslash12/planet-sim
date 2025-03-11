@@ -1,2 +1,6 @@
 /target
 /pkg
+
+# for now, ignore images
+*.png
+*.jpg
