@@ -4,3 +4,6 @@
 # for now, ignore images
 *.png
 *.jpg
+
+# also ignore text files
+*.txt

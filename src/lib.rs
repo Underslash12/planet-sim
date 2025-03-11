@@ -3,11 +3,10 @@
 #[cfg(target_arch="wasm32")]
 use wasm_bindgen::prelude::*;
 
+use log::{error, info};
+
 use winit::{
-    event::*,
-    event_loop::EventLoop,
-    keyboard::{KeyCode, PhysicalKey},
-    window::{Window, WindowBuilder},
+    dpi::PhysicalSize, event::*, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
 };
 
 use wgpu::util::DeviceExt;
@@ -76,6 +75,65 @@ const INDICES: &[u16] = &[
 ];
 
 
+// now camera stuff
+// camera matrix for converting between camera types
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.5,
+    0.0, 0.0, 0.0, 1.0,
+);
+
+// perspective camera struct
+struct Camera {
+    eye: cgmath::Point3<f32>,
+    target: cgmath::Point3<f32>,
+    up: cgmath::Vector3<f32>,
+    aspect: f32,
+    fovy: f32,
+    znear: f32,
+    zfar: f32,
+}
+
+impl Camera {
+    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+        error!("Eye: {:?}, Target: {:?}, Up: {:?}", self.eye, self.target, self.up);
+        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+        error!("View: {:?}", view);
+        error!("Proj params: ({:?}) {:?} {:?} {:?} {:?}", self.fovy, cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+        error!("Proj: {:?}", proj);
+        error!("view_proj: {:?}", OPENGL_TO_WGPU_MATRIX * proj * view);
+        return OPENGL_TO_WGPU_MATRIX * proj * view;
+    }
+}
+
+// We need this for Rust to store our data correctly for the shaders
+#[repr(C)]
+// This is so we can store this in a buffer
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct CameraUniform {
+    // We can't use cgmath with bytemuck directly, so we'll have
+    // to convert the Matrix4 into a 4x4 f32 array
+    view_proj: [[f32; 4]; 4],
+}
+
+impl CameraUniform {
+    fn new() -> Self {
+        use cgmath::SquareMatrix;
+        Self {
+            view_proj: cgmath::Matrix4::identity().into(),
+        }
+    }
+
+    fn update_view_proj(&mut self, camera: &Camera) {
+        self.view_proj = camera.build_view_projection_matrix().into();
+    }
+}
+
+
+
 // webgpu state including the surface, device, and render pipeline
 struct State<'a> {
     surface: wgpu::Surface<'a>,
@@ -91,13 +149,22 @@ struct State<'a> {
     index_buffer: wgpu::Buffer, 
     diffuse_bind_group: wgpu::BindGroup,
     diffuse_texture: texture::Texture,
+    camera: Camera,
+    camera_uniform: CameraUniform,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
 }
-
 
 impl<'a> State<'a> {
     // Creating some of the wgpu types requires async code
     async fn new(window: &'a Window) -> State<'a> {
+        // window.inner_size() returns 0 on the web (probably the way the html is written), so for now, just hardcode it for the wasm
+        #[cfg(target_arch = "wasm32")]
+        let mut size = PhysicalSize::new(640, 640);
+        #[cfg(not(target_arch = "wasm32"))]
         let size = window.inner_size();
+        error!("Window Size: {:?}", window.inner_size());
+        
 
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
@@ -198,7 +265,7 @@ impl<'a> State<'a> {
                 ],
                 label: Some("texture_bind_group_layout"),
             });
-
+            
         // create the bind group using the above layout
         let diffuse_bind_group = device.create_bind_group(
             &wgpu::BindGroupDescriptor {
@@ -216,12 +283,76 @@ impl<'a> State<'a> {
                 label: Some("diffuse_bind_group"),
             }
         );
+        
+        // create the camera
+        let camera = Camera {
+            // position the camera 1 unit up and 2 units back
+            // +z is out of the screen
+            eye: (0.0, 1.0, 2.0).into(),
+            // have it look at the origin
+            target: (0.0, 0.0, 0.0).into(),
+            // which way is "up"
+            up: cgmath::Vector3::unit_y(),
+            aspect: config.width as f32 / config.height as f32,
+            fovy: 45.0,
+            znear: 0.1,
+            zfar: 100.0,
+        };
+
+        // create the camera uniform and buffer
+        let mut camera_uniform = CameraUniform::new();
+        error!("{:?}", camera_uniform);
+        camera_uniform.update_view_proj(&camera);
+        error!("{:?}", camera_uniform);
+
+        let camera_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Camera Buffer"),
+                contents: bytemuck::cast_slice(&[camera_uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+
+        // now we need to create the bind group for the camera, which requires another bind layout
+        // this one just has a single binding, namely a buffer
+        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
+            ],
+            label: Some("camera_bind_group_layout"),
+        });
+        
+        // camera uniform bind group
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                }
+            ],
+            label: Some("camera_bind_group"),
+        });
+        
+    
 
         // 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&texture_bind_group_layout],
+                bind_group_layouts: &[
+                    &texture_bind_group_layout,
+                    &camera_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -307,6 +438,10 @@ impl<'a> State<'a> {
             index_buffer,
             diffuse_bind_group,
             diffuse_texture,
+            camera,
+            camera_uniform,
+            camera_buffer,
+            camera_bind_group,
         }
     }
 
@@ -375,17 +510,14 @@ impl<'a> State<'a> {
             render_pass.set_pipeline(&self.render_pipeline); 
             // add in a bind group for our texture
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            // set the bind group for our camera binding
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             // need to actually assign the buffer we created to the renderer (since it needs a specific slot)
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             // as with the vertex buffer, we have to set the active index buffer, but this time there is only one slot (hence active)
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); 
             // instead of using draw, since we are using an index buffer, we have to use draw_indexed
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
-            
-            // draw 1 instance of all of our vertices
-            // render_pass.draw(0..self.num_vertices, 0..1);   
-            // render_pass.draw(0..3, 0..1); 
-            
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);            
         }
         
     
