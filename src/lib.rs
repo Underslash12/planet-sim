@@ -7,7 +7,7 @@ use web_time::{Instant, Duration};
 use winit::{
     dpi::PhysicalSize, event::*, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
 };
-use wgpu::util::DeviceExt;
+use wgpu::{util::DeviceExt, vertex_attr_array};
 use cgmath::prelude::*;
 
 #[cfg(target_arch="wasm32")]
@@ -24,6 +24,12 @@ struct Vertex {
 }
 
 impl Vertex {
+    // two attributes, the first being the position, and the second the texture coordinates
+    // attributes are what is referenced by @location in the wgsl shader code, and are shared between
+    // different invocations (not sure if also shared over different shader types)
+    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+        vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+
     // get the vertexbufferlayout associated with the Vertex struct
     // the vertexbufferlayout is just how each vertex is laid out within the buffer
     fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -31,35 +37,12 @@ impl Vertex {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             // the attributes specify how each vertex should be further divided
-            attributes: &[
-                // this attribute corresponds to the position
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                // and this attribute, which corresponds to the color, is offset by the size of the previous attribute
-                // the shader location lets wgsl know what @location(i) refers to, so in this case @location(1) refers to the vec3f field for color
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                }
-            ]
-            // could use the following wgpu macro to auto-generate the attributes
-            // attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+            attributes: &Self::ATTRIBUTES,
         }
     }
 }
 
 // a simple pentagon
-// const VERTICES: &[Vertex] = &[
-//     Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0] }, // A
-//     Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.4, 0.6, 0.0] }, // B
-//     Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.0, 0.8, 0.2] }, // C
-//     Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.0, 0.2, 0.8] }, // D
-//     Vertex { position: [0.44147372, 0.2347359, 0.0], color: [0.4, 0.0, 0.6] }, // E
-// ];
 const VERTICES: &[Vertex] = &[
     Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 1.0 - 0.99240386], }, // A
     Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 1.0 - 0.56958647], }, // B
@@ -98,6 +81,9 @@ struct InstanceRaw {
 }
 
 impl InstanceRaw {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
+        vertex_attr_array![5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4];
+
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
         wgpu::VertexBufferLayout {
@@ -106,32 +92,9 @@ impl InstanceRaw {
             // This means that our shaders will only change to use the next
             // instance when the shader starts processing a new instance
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &[
-                // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
-                // for each vec4. We'll have to reassemble the mat4 in the shader.
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    // While our vertex shader only uses locations 0, and 1 now, in later tutorials, we'll
-                    // be using 2, 3, and 4, for Vertex. We'll start at slot 5, not conflict with them later
-                    shader_location: 5,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
-                    shader_location: 6,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
-                    shader_location: 7,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
-                    shader_location: 8,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-            ],
+            // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
+            // for each vec4. We'll have to reassemble the mat4 in the shader.
+            attributes: &Self::ATTRIBUTES,
         }
     }
 }
