@@ -1,26 +1,28 @@
 // sim.rs
 
-use cgmath::{InnerSpace, MetricSpace, Zero};
+use cgmath::{InnerSpace, MetricSpace, Vector3, Zero};
 use web_time::{Instant, Duration};
 use winit::dpi::Position;
 use wgpu::vertex_attr_array;
 
 
 pub struct AstroBody {
-    mass: f64,
-    radius: f64,
-    position: cgmath::Vector3<f64>,
-    velocity: cgmath::Vector3<f64>,
-    rotation: cgmath::Quaternion<f32>,
-    axis_of_rotation: cgmath::Vector3<f64>,
-    angular_velocity: f64, 
+    pub label: String,
+    pub mass: f64,
+    pub radius: f64,
+    pub position: cgmath::Vector3<f64>,
+    pub velocity: cgmath::Vector3<f64>,
+    pub rotation: cgmath::Quaternion<f32>,
+    pub axis_of_rotation: cgmath::Vector3<f64>,
+    pub angular_velocity: f64, 
 }
 
 impl AstroBody {
-    pub fn new(mass: f64, radius: f64, position: cgmath::Vector3<f64>, velocity: cgmath::Vector3<f64>, 
+    pub fn new(label: &str, mass: f64, radius: f64, position: cgmath::Vector3<f64>, velocity: cgmath::Vector3<f64>, 
         rotation: cgmath::Quaternion<f32>, axis_of_rotation: cgmath::Vector3<f64>, angular_velocity: f64
     ) -> AstroBody {
         AstroBody {
+            label: String::from(label),
             mass,
             radius,
             position,
@@ -31,8 +33,12 @@ impl AstroBody {
         }
     } 
 
+    pub fn get_low_precision_position(&self) -> Vector3<f32> {
+        Vector3::new(self.position.x as f32, self.position.y as f32, self.position.z as f32)
+    }
+
     fn to_raw_instance(&self) -> AstroBodyInstanceRaw {
-        let low_precision_position: cgmath::Vector3<f32> = cgmath::Vector3::new(self.position.x as f32, self.position.y as f32, self.position.z as f32);
+        let low_precision_position = self.get_low_precision_position();
         let translation = cgmath::Matrix4::from_translation(low_precision_position);
         let scale = cgmath::Matrix4::from_scale(self.radius as f32);
         AstroBodyInstanceRaw {
@@ -71,7 +77,8 @@ impl AstroBodyInstanceRaw {
 
 
 pub struct PlanetSim {
-    objects: Vec<AstroBody>,
+    pub objects: Vec<AstroBody>,
+    focused_index: Option<usize>,  
     gravitational_constant: f64,
 }
 
@@ -79,6 +86,7 @@ impl PlanetSim {
     pub fn new(gravitational_constant: f64) -> PlanetSim {
         PlanetSim {
             objects: Vec::new(),
+            focused_index: None,
             gravitational_constant,
         }
     }
@@ -87,8 +95,53 @@ impl PlanetSim {
         self.objects.push(body);
     }
 
+    // removes the object associated with label from the sim
+    // if it was the focused object, then sets the focused object to the default parameter if possible
+    // if the focused object is none, it isn't replaced by the default
+    pub fn remove(&mut self, label: &str, default_focus: Option<&str>) {
+        // remove the associated label 
+        for i in 0..self.len() {
+            if self.objects[i].label == label {
+                self.objects.remove(i);
+                break;
+            }
+        }
+        
+        // set the new focus after removing to keep the indices consistent
+        if let Some(old_focus) = self.get_focused() {
+            if old_focus.label == label {
+                self.set_focused(default_focus); 
+            } else {
+                self.set_focused(Some(&(old_focus.label.clone())));
+            }
+        }   
+    }
+
     pub fn len(&self) -> usize {
         self.objects.len()
+    }
+
+    pub fn get_focused(&self) -> Option<&AstroBody> {
+        match self.focused_index {
+            // this branch should never return None, want to panic if that is the case as it indicates some error occurred
+            Some(index) => Some(self.objects.get(index).expect(&format!("Focused object index {} was invalid", index))),
+            None => None,
+        }
+    }
+
+    pub fn set_focused(&mut self, label: Option<&str>) {
+        match label {
+            Some(new_label) => {
+                for i in 0..self.len() {
+                    if self.objects[i].label == new_label {
+                        self.focused_index = Some(i);
+                        return;
+                    } 
+                }
+                self.focused_index = None;
+            },
+            None => self.focused_index = None,
+        }
     }
 
     // the timestep is time between updating in the simulation (which could be anywhere from milliseconds to years), not necessarily time between frames
@@ -129,6 +182,12 @@ impl PlanetSim {
         for body in &mut self.objects {
             body.position += body.velocity * timestep.as_secs_f64();
         }
+        if let Some(obj) = self.get_focused() {
+            let base_pos = obj.position;
+            for body in &mut self.objects {
+                body.position -= base_pos;
+            }
+        }
 
         // TODO: update rotation 
     }
@@ -146,6 +205,7 @@ pub fn test_sim() {
     let mut ps = PlanetSim::new(6.67408 / 100_000_000_000.0);
     
     ps.add(AstroBody{
+        label: String::from("Test 1"),
         mass: 100.0,
         radius: 1.0,
         position: cgmath::Vector3::new(-1.0, -1.0, 0.0),
@@ -156,6 +216,7 @@ pub fn test_sim() {
     });
 
     ps.add(AstroBody{
+        label: String::from("Test 2"),
         mass: 100.0,
         radius: 1.0,
         position: cgmath::Vector3::new(1.0, 1.0, 0.0),

@@ -5,6 +5,7 @@ use log::{error, info};
 use core::f32;
 use std::{collections::VecDeque, f32::consts::PI};
 use web_time::{Instant, Duration};
+use std::thread;
 
 use winit::{
     dpi::PhysicalSize, event::*, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
@@ -115,11 +116,11 @@ struct Camera {
 }
 
 impl Camera {
-    fn build_view_projection_matrix(&self) -> Matrix4<f32> {
+    fn build_view_projection_matrix(&self, offset: Vector3<f32>) -> Matrix4<f32> {
         // let view = Matrix4::look_at_rh(self.eye, self.target, self.up);
         
         // want to convert from world space to cam space, so compute the inverse of what we normally would
-        let translation_inv = Matrix4::from_translation(-self.pos);
+        let translation_inv = Matrix4::from_translation(-self.pos + (-offset));
         let yaw_inv = Matrix4::from_angle_y(Rad(self.yaw)).transpose();
         let pitch_inv = Matrix4::from_angle_x(Rad(self.pitch)).transpose();
         // let initial_rotation: Matrix4<f32> = Matrix4::look_at_rh(Point3::from_vec(Vector3::zero()), Point3::from_vec(Vector3::unit_z()), self.up);
@@ -155,8 +156,8 @@ impl CameraUniform {
         }
     }
 
-    fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+    fn update_view_proj(&mut self, camera: &Camera, offset: Vector3<f32>) {
+        self.view_proj = camera.build_view_projection_matrix(offset).into();
     }
 }
 
@@ -399,6 +400,16 @@ impl FrameCounter {
         }
         Duration::from_secs(0)
     }   
+
+    fn clamped_delta_time(&self) -> Duration {
+        let delta_time = self.delta_time();
+        let max_delta_time = Duration::from_secs_f64(0.1);
+        if delta_time > max_delta_time {
+            max_delta_time
+        } else {
+            delta_time
+        }
+    }
 }
 
 
@@ -579,7 +590,7 @@ impl<'a> State<'a> {
 
         // create the camera uniform and buffer
         let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
+        camera_uniform.update_view_proj(&camera, planet_sim.get_focused().unwrap().get_low_precision_position());
 
         let camera_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -775,7 +786,7 @@ impl<'a> State<'a> {
         self.frame_counter.update();
 
         self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform.update_view_proj(&self.camera);
+        self.camera_uniform.update_view_proj(&self.camera, self.planet_sim.get_focused().unwrap().get_low_precision_position());
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
 
         self.planet_sim.update(self.frame_counter.delta_time());
@@ -844,7 +855,6 @@ impl<'a> State<'a> {
             render_pass.draw_indexed(0..self.num_indices, 0, 0..self.planet_sim.len() as u32);      
         }
         
-    
         // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
@@ -897,32 +907,37 @@ pub async fn run() {
     // test planet sim
     let mut planet_sim = PlanetSim::new(5.0);
     planet_sim.add(AstroBody::new(
-        1.0, 
+        "Test 1",
+        100.0, 
         0.5, 
-        Vector3::new(1.0, 0.0, 0.5),
-        Vector3::new(0.0, 0.0, 1.0),
+        Vector3::new(0.0, 0.0, 0.0),
+        // Vector3::new(0.0, 0.0, 1.0),
+        Vector3::zero(),
         Quaternion::zero(),
         Vector3::unit_z(),
         0.0,
     ));
     planet_sim.add(AstroBody::new(
+        "Test 2",
         1.0, 
         0.5, 
-        Vector3::new(-1.0, 0.0, -0.5),
-        Vector3::new(0.0, 0.0, -1.0),
+        Vector3::new(-5.0, 0.0, 0.0),
+        Vector3::new(0.0, 0.0, -10.0),
         Quaternion::zero(),
         Vector3::unit_z(),
         0.0,
     ));
-    planet_sim.add(AstroBody::new(
-        1.0, 
-        0.5, 
-        Vector3::new(-1.0, 0.5, 0.5),
-        Vector3::new(0.0, 0.0, -1.0),
-        Quaternion::zero(),
-        Vector3::unit_z(),
-        0.0,
-    ));
+    // planet_sim.add(AstroBody::new(
+    //     "Test 3",
+    //     1.0, 
+    //     0.5, 
+    //     Vector3::new(-1.0, 0.5, 0.5),
+    //     Vector3::new(0.0, 0.0, -1.0),
+    //     Quaternion::zero(),
+    //     Vector3::unit_z(),
+    //     0.0,
+    // ));
+    planet_sim.set_focused(Some("Test 1"));
 
     // create the state
     let mut state = State::new(&window, planet_sim).await;
