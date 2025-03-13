@@ -1,14 +1,16 @@
 // lib.rs
 
+use env_logger::init;
 use log::{error, info};
-use std::collections::VecDeque;
+use core::f32;
+use std::{collections::VecDeque, f32::consts::PI};
 use web_time::{Instant, Duration};
 
 use winit::{
     dpi::PhysicalSize, event::*, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
 };
 use wgpu::{util::DeviceExt, vertex_attr_array};
-use cgmath::prelude::*;
+use cgmath::{perspective, prelude::*, Point3, Rad, Deg, Vector3, Vector4, Matrix4, Quaternion};
 
 #[cfg(target_arch="wasm32")]
 use wasm_bindgen::prelude::*;
@@ -44,73 +46,54 @@ impl Vertex {
     }
 }
 
-// a simple pentagon
+// // a simple pentagon
+// const VERTICES: &[Vertex] = &[
+//     Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 1.0 - 0.99240386], }, // A
+//     Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 1.0 - 0.56958647], }, // B
+//     Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 1.0 - 0.05060294], }, // C
+//     Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 1.0 - 0.1526709], }, // D
+//     Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 1.0 - 0.7347359], }, // E
+// ];
+
+// // vertex buffer indices
+// const INDICES: &[u16] = &[
+//     0, 1, 4,
+//     1, 2, 4,
+//     2, 3, 4,
+// ];
+
+// a cube
 const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 1.0 - 0.99240386], }, // A
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 1.0 - 0.56958647], }, // B
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 1.0 - 0.05060294], }, // C
-    Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 1.0 - 0.1526709], }, // D
-    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 1.0 - 0.7347359], }, // E
+    Vertex { position: [-1.0, -1.0, -1.0], tex_coords: [-1.0, -1.0], }, 
+    Vertex { position: [1.0, -1.0, -1.0], tex_coords: [1.0, -1.0], }, 
+    Vertex { position: [-1.0, -1.0, 1.0], tex_coords: [-1.0, 1.0], }, 
+    Vertex { position: [1.0, -1.0, 1.0], tex_coords: [1.0, 1.0], }, 
+    Vertex { position: [-1.0, 1.0, -1.0], tex_coords: [-1.0, -1.0], }, 
+    Vertex { position: [1.0, 1.0, -1.0], tex_coords: [1.0, -1.0], }, 
+    Vertex { position: [-1.0, 1.0, 1.0], tex_coords: [-1.0, 1.0], }, 
+    Vertex { position: [1.0, 1.0, 1.0], tex_coords: [1.0, 1.0], }, 
 ];
 
-// vertex buffer indices
 const INDICES: &[u16] = &[
-    0, 1, 4,
-    1, 2, 4,
-    2, 3, 4,
+    0, 1, 3,
+    0, 3, 2,
+    0, 5, 1,
+    0, 5, 4,
+    0, 4, 2,
+    2, 4, 6,
+    2, 6, 7,
+    2, 7, 3,
+    1, 3, 7,
+    1, 7, 5,
+    4, 5, 7,
+    4, 7, 6,
 ];
-
-// // instancing struct, for now is just a position and rotation, but could include other things, like a color
-// struct Instance {
-//     position: cgmath::Vector3<f32>,
-//     rotation: cgmath::Quaternion<f32>,
-// }
-
-// impl Instance {
-//     fn to_raw(&self) -> InstanceRaw {
-//         InstanceRaw {
-//             model: (cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation)).into(),
-//         }
-//     }
-// }
-
-// // send a single transformation matrix to the GPU
-// // since we can't send over a matrix, need to send over the vectors that comprise it
-// #[repr(C)]
-// #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-// struct InstanceRaw {
-//     model: [[f32; 4]; 4],
-// }
-
-// impl InstanceRaw {
-//     const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-//         vertex_attr_array![5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4];
-
-//     fn desc() -> wgpu::VertexBufferLayout<'static> {
-//         use std::mem;
-//         wgpu::VertexBufferLayout {
-//             array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
-//             // We need to switch from using a step mode of Vertex to Instance
-//             // This means that our shaders will only change to use the next
-//             // instance when the shader starts processing a new instance
-//             step_mode: wgpu::VertexStepMode::Instance,
-//             // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
-//             // for each vec4. We'll have to reassemble the mat4 in the shader.
-//             attributes: &Self::ATTRIBUTES,
-//         }
-//     }
-// }
-
-
-// const NUM_INSTANCES_PER_ROW: u32 = 10;
-// const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0, NUM_INSTANCES_PER_ROW as f32 * 0.5);
-
 
 
 // now camera stuff
 // camera matrix for converting between camera types
 #[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
+pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
     1.0, 0.0, 0.0, 0.0,
     0.0, 1.0, 0.0, 0.0,
     0.0, 0.0, 0.5, 0.5,
@@ -119,9 +102,12 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 
 // perspective camera struct
 struct Camera {
-    eye: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
+    pos: Vector3<f32>,
+    // specify the camera rotation as raw yaw and pitch since we don't want it to roll
+    // and the yaw can be easily restricted here
+    yaw: f32,
+    pitch: f32,
+    up: Vector3<f32>,
     aspect: f32,
     fovy: f32,
     znear: f32,
@@ -129,10 +115,25 @@ struct Camera {
 }
 
 impl Camera {
-    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
-        return OPENGL_TO_WGPU_MATRIX * proj * view;
+    fn build_view_projection_matrix(&self) -> Matrix4<f32> {
+        // let view = Matrix4::look_at_rh(self.eye, self.target, self.up);
+        
+        // want to convert from world space to cam space, so compute the inverse of what we normally would
+        let translation_inv = Matrix4::from_translation(-self.pos);
+        let yaw_inv = Matrix4::from_angle_y(Rad(self.yaw)).transpose();
+        let pitch_inv = Matrix4::from_angle_x(Rad(self.pitch)).transpose();
+        // let initial_rotation: Matrix4<f32> = Matrix4::look_at_rh(Point3::from_vec(Vector3::zero()), Point3::from_vec(Vector3::unit_z()), self.up);
+        
+        // so instead of applying pitch -> yaw -> translation, we apply translation^-1 -> yaw^-1 -> pitch^-1
+        let view = pitch_inv * yaw_inv * translation_inv;
+        let proj = perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+        OPENGL_TO_WGPU_MATRIX * proj * view
+    }
+
+    fn view(&self) -> Matrix4<f32> {
+        let yaw_rot = Matrix4::from_angle_y(Rad(-self.yaw));
+        let pitch_rot = Matrix4::from_angle_x(Rad(-self.pitch));
+        yaw_rot * pitch_rot
     }
 }
 
@@ -148,9 +149,9 @@ struct CameraUniform {
 
 impl CameraUniform {
     fn new() -> Self {
-        use cgmath::SquareMatrix;
+        use SquareMatrix;
         Self {
-            view_proj: cgmath::Matrix4::identity().into(),
+            view_proj: Matrix4::identity().into(),
         }
     }
 
@@ -159,24 +160,34 @@ impl CameraUniform {
     }
 }
 
-
 // basic camera controller
-struct CameraController {
-    speed: f32,
-    is_forward_pressed: bool,
-    is_backward_pressed: bool,
-    is_left_pressed: bool,
-    is_right_pressed: bool,
+struct CameraInput {
+    // each input is how much it is moving/turning in that direction
+    move_forward_pressed: bool,
+    move_backward_pressed: bool,
+    move_right_pressed: bool,
+    move_left_pressed: bool,
+    move_up_pressed: bool,
+    move_down_pressed: bool,
+    turn_right_pressed: bool,
+    turn_left_pressed: bool,
+    turn_up_pressed: bool,
+    turn_down_pressed: bool,
 }
 
-impl CameraController {
-    fn new(speed: f32) -> Self {
+impl CameraInput {
+    fn new() -> Self {
         Self {
-            speed,
-            is_forward_pressed: false,
-            is_backward_pressed: false,
-            is_left_pressed: false,
-            is_right_pressed: false,
+            move_forward_pressed: false,
+            move_backward_pressed: false,
+            move_right_pressed: false,
+            move_left_pressed: false,
+            move_up_pressed: false,
+            move_down_pressed: false,
+            turn_right_pressed: false,
+            turn_left_pressed: false,
+            turn_up_pressed: false,
+            turn_down_pressed: false,
         }
     }
 
@@ -192,59 +203,153 @@ impl CameraController {
                 ..
             } => {
                 let is_pressed = *state == ElementState::Pressed;
-                match keycode {KeyCode::KeyW | KeyCode::ArrowUp => {
-                        self.is_forward_pressed = is_pressed;
+                match keycode {
+                    KeyCode::KeyW => {
+                        self.move_forward_pressed = is_pressed;
                         true
                     }
-                    KeyCode::KeyA | KeyCode::ArrowLeft => {
-                        self.is_left_pressed = is_pressed;
+                    KeyCode::KeyS => {
+                        self.move_backward_pressed = is_pressed;
                         true
                     }
-                    KeyCode::KeyS | KeyCode::ArrowDown => {
-                        self.is_backward_pressed = is_pressed;
+                    KeyCode::KeyD => {
+                        self.move_right_pressed = is_pressed;
                         true
                     }
-                    KeyCode::KeyD | KeyCode::ArrowRight => {
-                        self.is_right_pressed = is_pressed;
+                    KeyCode::KeyA => {
+                        self.move_left_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::Space => {
+                        self.move_up_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::ShiftLeft | KeyCode::ShiftRight => {
+                        self.move_down_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::ArrowRight => {
+                        self.turn_right_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::ArrowLeft => {
+                        self.turn_left_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::ArrowUp => {
+                        self.turn_up_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::ArrowDown => {
+                        self.turn_down_pressed = is_pressed;
                         true
                     }
                     _ => false,
                 }
             }
+            // WindowEvent::CursorMoved { device_id, position } => {
+            //     println!("{:?}", position);
+            //     true
+            // },
             _ => false,
         }
     }
 
+    fn move_forward_input(&self) -> f32 {
+        let mut result = 0.0;
+        // these are switched since +z is out of the screen, not into it
+        if self.move_forward_pressed {
+            result -= 1.0;
+        } 
+        if self.move_backward_pressed {
+            result += 1.0;
+        }
+        result
+    }
+
+    fn move_right_input(&self) -> f32 {
+        let mut result = 0.0;
+        if self.move_right_pressed {
+            result += 1.0;
+        } 
+        if self.move_left_pressed {
+            result -= 1.0;
+        }
+        result
+    }
+
+    fn move_up_input(&self) -> f32 {
+        let mut result = 0.0;
+        if self.move_up_pressed {
+            result += 1.0;
+        } 
+        if self.move_down_pressed {
+            result -= 1.0;
+        }
+        result
+    }
+
+    fn turn_right_input(&self) -> f32 {
+        let mut result = 0.0;
+        // for yaw, i think this is just arbitrary (might be wrong), but will flip this as well
+        if self.turn_right_pressed {
+            result -= 1.0;
+        } 
+        if self.turn_left_pressed {
+            result += 1.0;
+        }
+        result
+    }
+
+    fn turn_up_input(&self) -> f32 {
+        let mut result = 0.0;
+        if self.turn_up_pressed {
+            result += 1.0;
+        } 
+        if self.turn_down_pressed {
+            result -= 1.0;
+        }
+        result
+    }
+}
+
+struct CameraController {
+    input: CameraInput, 
+    speed: f32,
+}
+
+impl CameraController {
+    fn new(speed: f32) -> CameraController {
+        CameraController {
+            input: CameraInput::new(),
+            speed,
+        }
+    }
+
+    fn process_events(&mut self, event: &WindowEvent) -> bool {
+        self.input.process_events(event)
+    }
+
     fn update_camera(&self, camera: &mut Camera) {
-        use cgmath::InnerSpace;
-        let forward = camera.target - camera.eye;
-        let forward_norm = forward.normalize();
-        let forward_mag = forward.magnitude();
+        // update the position
+        // have to perform a change of basis to get to camera space
+        let translation_vector = self.speed * Vector4::new(
+            self.input.move_right_input(), 
+            0.0,
+            self.input.move_forward_input(),
+            1.0,
+        );
 
-        // Prevents glitching when the camera gets too close to the
-        // center of the scene.
-        if self.is_forward_pressed && forward_mag > self.speed {
-            camera.eye += forward_norm * self.speed;
-        }
-        if self.is_backward_pressed {
-            camera.eye -= forward_norm * self.speed;
-        }
+        // i personally want the up and down not to depend on camera orientation, but maybe ill make that a toggle
+        let yaw = Matrix4::from_angle_y(Rad(camera.yaw));
+        camera.pos += (yaw * translation_vector).xyz();
+        camera.pos.y += self.input.move_up_input() * self.speed;
 
-        let right = forward_norm.cross(camera.up);
-
-        // Redo radius calc in case the forward/backward is pressed.
-        let forward = camera.target - camera.eye;
-        let forward_mag = forward.magnitude();
-
-        if self.is_right_pressed {
-            // Rescale the distance between the target and the eye so 
-            // that it doesn't change. The eye, therefore, still 
-            // lies on the circle made by the target and eye.
-            camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
-        }
-        if self.is_left_pressed {
-            camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
-        }
+        // update the rotation
+        camera.yaw += self.input.turn_right_input() * self.speed;
+        camera.yaw %= 2.0 * f32::consts::PI;
+        camera.pitch += self.input.turn_up_input() * self.speed;
+        camera.pitch = camera.pitch.clamp(-f32::consts::PI / 2.0, f32::consts::PI / 2.0);
     }
 }
 
@@ -455,18 +560,21 @@ impl<'a> State<'a> {
         let camera = Camera {
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
-            eye: (0.0, 1.0, 2.0).into(),
+            // eye: (0.0, 1.0, 2.0).into(),
             // have it look at the origin
-            target: (0.0, 0.0, 0.0).into(),
+            // target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
-            up: cgmath::Vector3::unit_y(),
+            pos: Vector3::zero(),
+            yaw: 0.0,
+            pitch: 0.0,
+            up: Vector3::unit_y(),
             aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
             znear: 0.1,
             zfar: 100.0,
         };
 
-        let camera_controller = CameraController::new(0.2);
+        let camera_controller = CameraController::new(0.03);
 
         // create the camera uniform and buffer
         let mut camera_uniform = CameraUniform::new();
@@ -738,6 +846,11 @@ pub async fn run() {
     
     let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
+    // window.set_cursor_visible(false);
+    // #[cfg(target_arch = "wasm32")]
+    // window.set_cursor_grab(winit::window::CursorGrabMode::Locked);
+    // #[cfg(not(target_arch = "wasm32"))]
+    // window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
 
     // if targetting wasm, add the canvas that is displaying the webgl to the document
     #[cfg(target_arch = "wasm32")]
@@ -760,23 +873,32 @@ pub async fn run() {
     } 
 
     // test planet sim
-    let mut planet_sim = PlanetSim::new(1.0);
+    let mut planet_sim = PlanetSim::new(5.0);
     planet_sim.add(AstroBody::new(
         1.0, 
-        1.0, 
-        cgmath::Vector3::new(-1.0, 0.0, -1.0), 
-        cgmath::Vector3::zero(), 
-        cgmath::Quaternion::zero(),
-        cgmath::Vector3::unit_z(),
+        0.5, 
+        Vector3::new(1.0, 0.0, 0.5),
+        Vector3::new(0.0, 0.0, 1.0),
+        Quaternion::zero(),
+        Vector3::unit_z(),
         0.0,
     ));
     planet_sim.add(AstroBody::new(
         1.0, 
+        0.5, 
+        Vector3::new(-1.0, 0.0, -0.5),
+        Vector3::new(0.0, 0.0, -1.0),
+        Quaternion::zero(),
+        Vector3::unit_z(),
+        0.0,
+    ));
+    planet_sim.add(AstroBody::new(
         1.0, 
-        cgmath::Vector3::new(1.0, 0.0, 1.0), 
-        cgmath::Vector3::zero(), 
-        cgmath::Quaternion::zero(),
-        cgmath::Vector3::unit_z(),
+        0.5, 
+        Vector3::new(-1.0, 0.5, 0.5),
+        Vector3::new(0.0, 0.0, -1.0),
+        Quaternion::zero(),
+        Vector3::unit_z(),
         0.0,
     ));
 

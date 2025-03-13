@@ -33,8 +33,10 @@ impl AstroBody {
 
     fn to_raw_instance(&self) -> AstroBodyInstanceRaw {
         let low_precision_position: cgmath::Vector3<f32> = cgmath::Vector3::new(self.position.x as f32, self.position.y as f32, self.position.z as f32);
+        let translation = cgmath::Matrix4::from_translation(low_precision_position);
+        let scale = cgmath::Matrix4::from_scale(self.radius as f32);
         AstroBodyInstanceRaw {
-            mat: (cgmath::Matrix4::from_translation(low_precision_position)).into(),
+            mat: (translation * scale).into(),
         }
     }
 }
