@@ -14,6 +14,8 @@ use cgmath::prelude::*;
 use wasm_bindgen::prelude::*;
 
 mod texture;
+mod sim;
+use sim::{AstroBody, AstroBodyInstanceRaw, PlanetSim};
 
 
 #[repr(C)]
@@ -58,50 +60,50 @@ const INDICES: &[u16] = &[
     2, 3, 4,
 ];
 
-// instancing struct, for now is just a position and rotation, but could include other things, like a color
-struct Instance {
-    position: cgmath::Vector3<f32>,
-    rotation: cgmath::Quaternion<f32>,
-}
+// // instancing struct, for now is just a position and rotation, but could include other things, like a color
+// struct Instance {
+//     position: cgmath::Vector3<f32>,
+//     rotation: cgmath::Quaternion<f32>,
+// }
 
-impl Instance {
-    fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation)).into(),
-        }
-    }
-}
+// impl Instance {
+//     fn to_raw(&self) -> InstanceRaw {
+//         InstanceRaw {
+//             model: (cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation)).into(),
+//         }
+//     }
+// }
 
-// send a single transformation matrix to the GPU
-// since we can't send over a matrix, need to send over the vectors that comprise it
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceRaw {
-    model: [[f32; 4]; 4],
-}
+// // send a single transformation matrix to the GPU
+// // since we can't send over a matrix, need to send over the vectors that comprise it
+// #[repr(C)]
+// #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+// struct InstanceRaw {
+//     model: [[f32; 4]; 4],
+// }
 
-impl InstanceRaw {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-        vertex_attr_array![5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4];
+// impl InstanceRaw {
+//     const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
+//         vertex_attr_array![5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4];
 
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        use std::mem;
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
-            // We need to switch from using a step mode of Vertex to Instance
-            // This means that our shaders will only change to use the next
-            // instance when the shader starts processing a new instance
-            step_mode: wgpu::VertexStepMode::Instance,
-            // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
-            // for each vec4. We'll have to reassemble the mat4 in the shader.
-            attributes: &Self::ATTRIBUTES,
-        }
-    }
-}
+//     fn desc() -> wgpu::VertexBufferLayout<'static> {
+//         use std::mem;
+//         wgpu::VertexBufferLayout {
+//             array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
+//             // We need to switch from using a step mode of Vertex to Instance
+//             // This means that our shaders will only change to use the next
+//             // instance when the shader starts processing a new instance
+//             step_mode: wgpu::VertexStepMode::Instance,
+//             // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
+//             // for each vec4. We'll have to reassemble the mat4 in the shader.
+//             attributes: &Self::ATTRIBUTES,
+//         }
+//     }
+// }
 
 
-const NUM_INSTANCES_PER_ROW: u32 = 10;
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0, NUM_INSTANCES_PER_ROW as f32 * 0.5);
+// const NUM_INSTANCES_PER_ROW: u32 = 10;
+// const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0, NUM_INSTANCES_PER_ROW as f32 * 0.5);
 
 
 
@@ -283,6 +285,15 @@ impl FrameCounter {
         }
         0.0
     }
+
+    // computes the time between the previous two frames
+    fn delta_time(&self) -> Duration {
+        if self.frame_times.len() >= 2 {
+            let frames = self.frame_times.len();
+            return *self.frame_times.get(frames - 1).unwrap() - *self.frame_times.get(frames - 2).unwrap();
+        }
+        Duration::from_secs(0)
+    }   
 }
 
 
@@ -307,13 +318,14 @@ struct State<'a> {
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    instances: Vec<Instance>,
+    // instances: Vec<Instance>,
+    planet_sim: PlanetSim,
     instance_buffer: wgpu::Buffer,
 }
 
 impl<'a> State<'a> {
     // Creating some of the wgpu types requires async code
-    async fn new(window: &'a Window) -> State<'a> {
+    pub async fn new(window: &'a Window, planet_sim: PlanetSim) -> State<'a> {
         // window.inner_size() returns 0 on the web (probably the way the html is written), so for now, just hardcode it for the wasm
         #[cfg(target_arch = "wasm32")]
         let mut size = PhysicalSize::new(640, 640);
@@ -321,7 +333,6 @@ impl<'a> State<'a> {
         let size = window.inner_size();
         error!("Window Size: {:?}", window.inner_size());
         
-
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -499,36 +510,15 @@ impl<'a> State<'a> {
             label: Some("camera_bind_group"),
         });
         
-        // create each instance
-        let instances = (0..NUM_INSTANCES_PER_ROW).flat_map(|z| {
-            (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                let position = cgmath::Vector3 { x: x as f32, y: 0.0, z: z as f32 } - INSTANCE_DISPLACEMENT;
-
-                let rotation = if position.is_zero() {
-                    // this is needed so an object at (0, 0, 0) won't get scaled to zero
-                    // as Quaternions can affect scale if they're not created correctly
-                    cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
-                } else {
-                    cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                };
-
-                Instance {
-                    position, rotation,
-                }
-            })
-        }).collect::<Vec<_>>();
-
-        // create the instance buffer
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        // create the instance buffer for the astronomical bodies
+        let instance_data = planet_sim.instance_data();
         let instance_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
-                label: Some("Instance Buffer"),
+                label: Some("AstroBody Instance Buffer"),
                 contents: bytemuck::cast_slice(&instance_data),
-                usage: wgpu::BufferUsages::VERTEX,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             }
         );
-
-
 
 
         // the layout for the pipeline, useful for hotswapping pipelines i think
@@ -551,7 +541,7 @@ impl<'a> State<'a> {
                 entry_point: Some("vs_main"),
                 buffers: &[
                     Vertex::desc(),
-                    InstanceRaw::desc(),
+                    AstroBodyInstanceRaw::desc(),
                 ],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
@@ -569,7 +559,8 @@ impl<'a> State<'a> {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                // cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
                 // Requires Features::DEPTH_CLIP_CONTROL
@@ -631,8 +622,9 @@ impl<'a> State<'a> {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            instances,
+            // instances,
             instance_buffer,
+            planet_sim, 
         }
     }
 
@@ -662,6 +654,10 @@ impl<'a> State<'a> {
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
+
+        self.planet_sim.update(self.frame_counter.delta_time());
+        let instance_data = self.planet_sim.instance_data();
+        self.queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instance_data));
     }
 
     // render whatever needs to be rendered onto the surface
@@ -715,7 +711,7 @@ impl<'a> State<'a> {
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); 
             // instead of using draw, since we are using an index buffer, we have to use draw_indexed
             // render_pass.draw_indexed(0..self.num_indices, 0, 0..1);      
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);      
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.planet_sim.len() as u32);      
         }
         
     
@@ -763,8 +759,29 @@ pub async fn run() {
             .expect("Couldn't append canvas to document body.");
     } 
 
+    // test planet sim
+    let mut planet_sim = PlanetSim::new(1.0);
+    planet_sim.add(AstroBody::new(
+        1.0, 
+        1.0, 
+        cgmath::Vector3::new(-1.0, 0.0, -1.0), 
+        cgmath::Vector3::zero(), 
+        cgmath::Quaternion::zero(),
+        cgmath::Vector3::unit_z(),
+        0.0,
+    ));
+    planet_sim.add(AstroBody::new(
+        1.0, 
+        1.0, 
+        cgmath::Vector3::new(1.0, 0.0, 1.0), 
+        cgmath::Vector3::zero(), 
+        cgmath::Quaternion::zero(),
+        cgmath::Vector3::unit_z(),
+        0.0,
+    ));
+
     // create the state
-    let mut state = State::new(&window).await;
+    let mut state = State::new(&window, planet_sim).await;
     let mut surface_configured = false;
 
     event_loop.run(move |event, control_flow| {
