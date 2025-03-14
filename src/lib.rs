@@ -2,6 +2,8 @@
 
 use env_logger::init;
 use log::{error, info};
+use wasm_bindgen::closure;
+use web_sys::Document;
 use core::f32;
 use std::{collections::VecDeque, f32::consts::PI};
 use web_time::{Instant, Duration};
@@ -14,7 +16,9 @@ use wgpu::{util::DeviceExt, vertex_attr_array};
 use cgmath::{perspective, prelude::*, Point3, Rad, Deg, Vector3, Vector4, Matrix4, Quaternion};
 
 #[cfg(target_arch="wasm32")]
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::{prelude::*, JsCast};
+#[cfg(target_arch="wasm32")]
+use web_sys::HtmlButtonElement;
 
 mod texture;
 mod sim;
@@ -877,7 +881,7 @@ pub async fn run() {
     }
     
     let event_loop = EventLoop::new().unwrap();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
+    let window: Window = WindowBuilder::new().build(&event_loop).unwrap();
     // window.set_cursor_visible(false);
     // #[cfg(target_arch = "wasm32")]
     // window.set_cursor_grab(winit::window::CursorGrabMode::Locked);
@@ -893,15 +897,24 @@ pub async fn run() {
         let _ = window.request_inner_size(PhysicalSize::new(640, 640));
         
         use winit::platform::web::WindowExtWebSys;
-        web_sys::window()
-            .and_then(|win| win.document())
-            .and_then(|doc| {
-                let dst = doc.get_element_by_id("planet-sim")?;
-                let canvas = web_sys::Element::from(window.canvas()?);
-                dst.append_child(&canvas).ok()?;
-                Some(())
-            })
-            .expect("Couldn't append canvas to document body.");
+        use web_sys::{Element, HtmlButtonElement};
+
+        // get the html document
+        let document = web_sys::window().expect("Unable to get window").document().expect("Unable to get document");
+        
+        // construct the canvas from the winit window
+        let body = document.get_element_by_id("planet-sim").expect("Unable to get document body");
+        let canvas = Element::from(window.canvas().expect("Unable to create winit canvas"));
+        body.append_child(&canvas).expect("Failed to append canvas to document body");
+
+        // test button
+        let button_element = document.get_element_by_id("test-button").expect("Unable to get test button");
+        let button = button_element.dyn_ref::<HtmlButtonElement>().expect("Unable to convert element into a button").clone();
+        let closure = Closure::wrap(Box::new(move || {
+            error!("Button Clicked!!");
+        }) as Box<dyn Fn()>);
+        button.set_onclick(Some(closure.as_ref().unchecked_ref()));
+        closure.forget();
     } 
 
     // test planet sim
