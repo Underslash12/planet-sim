@@ -6,9 +6,11 @@ use wasm_bindgen::closure;
 use web_sys::Document;
 use core::f32;
 use std::{collections::VecDeque, f32::consts::PI};
-use web_time::{Instant, Duration};
+use web_time::{web, Duration, Instant};
 use std::thread;
 use std::sync::{Arc, Mutex};
+use std::any::type_name;
+use std::ops::Deref;
 
 use winit::{
     dpi::PhysicalSize, event::*, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
@@ -19,7 +21,7 @@ use cgmath::{perspective, prelude::*, Point3, Rad, Deg, Vector3, Vector4, Matrix
 #[cfg(target_arch="wasm32")]
 use wasm_bindgen::{prelude::*, JsCast};
 #[cfg(target_arch="wasm32")]
-use web_sys::{HtmlButtonElement, HtmlInputElement};
+use web_sys::{HtmlButtonElement, HtmlInputElement, HtmlElement};
 
 mod texture;
 mod sim;
@@ -81,18 +83,24 @@ const VERTICES: &[Vertex] = &[
 ];
 
 const INDICES: &[u16] = &[
+    // bottom
     0, 1, 3,
     0, 3, 2,
+    // front
     0, 5, 1,
-    0, 5, 4,
-    0, 4, 2,
-    2, 4, 6,
-    2, 6, 7,
-    2, 7, 3,
-    1, 3, 7,
-    1, 7, 5,
-    4, 5, 7,
-    4, 7, 6,
+    0, 4, 5,
+    // left
+    0, 2, 4,
+    2, 6, 4,
+    // back
+    2, 7, 6,
+    2, 3, 7,
+    // right
+    1, 7, 3,
+    1, 5, 7,
+    // top
+    4, 7, 5,
+    4, 6, 7,
 ];
 
 
@@ -689,8 +697,8 @@ impl<'a> State<'a> {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                // cull_mode: Some(wgpu::Face::Back),
-                cull_mode: None,
+                cull_mode: Some(wgpu::Face::Back),
+                // cull_mode: None,
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
                 // Requires Features::DEPTH_CLIP_CONTROL
@@ -872,6 +880,38 @@ impl<'a> State<'a> {
 }
 
 
+// get a generic html element by id using web_sys
+fn get_html_element_by_id<T: JsCast + Clone>(doc: &Document, id: &str) -> T {
+    let element: web_sys::Element = doc.get_element_by_id(id).expect(&format!("Unable to get element {}", id));
+    element.dyn_ref::<T>().expect(&format!("Unable to convert {} of type web_sys::Element into type {}", id, type_name::<T>())).clone()
+}
+
+// given an element and an htmlelement event, register some callback with it
+// this is complicated, and if it breaks, go back to "text input working" on branch js_bindings for a working but more repetitive method 
+fn register_js_callback<'a, E, F, C>(element: &'a E, event_function: F, callback: C) 
+    where 
+        E: AsRef<HtmlElement>,
+        F: Fn(&'a HtmlElement, Option<&web_sys::js_sys::Function>),
+        C: Fn() + 'static,
+{
+    let closure: Closure<dyn FnMut()> = Closure::wrap(Box::new(callback) as Box<dyn FnMut()>);
+    event_function(element.as_ref(), Some(closure.as_ref().unchecked_ref()));
+    closure.forget();
+}
+
+// given an element and an htmlelement event, register some callback with it where the callback can also access a web_sys::event parameter
+fn register_js_callback_with_event<'a, E, F, C>(element: &'a E, event_function: F, callback: C) 
+    where 
+        E: AsRef<HtmlElement>,
+        F: Fn(&'a HtmlElement, Option<&web_sys::js_sys::Function>),
+        C: Fn(web_sys::Event) + 'static,
+{
+    let closure: Closure<dyn FnMut(_)> = Closure::wrap(Box::new(callback) as Box<dyn FnMut(_)>);
+    event_function(element.as_ref(), Some(closure.as_ref().unchecked_ref()));
+    closure.forget();
+}
+
+
 #[cfg_attr(target_arch="wasm32", wasm_bindgen(start))]
 pub async fn run() {
     // log logs and panics in the js console if targeting wasm
@@ -909,7 +949,7 @@ pub async fn run() {
         // construct the canvas from the winit window
         let body = document.get_element_by_id("planet-sim").expect("Unable to get document body");
         let canvas = Element::from(window.canvas().expect("Unable to create winit canvas"));
-        // body.append_child(&canvas).expect("Failed to append canvas to document body");
+        // want the canvas to be on the left (in front of the )
         let first_child = body.child_nodes().item(0).expect("Couldn't get child 0 of body");
         body.insert_before(&canvas, Some(&first_child)).expect("Failed to insert canvas into document body");
     } 
@@ -960,20 +1000,17 @@ pub async fn run() {
         let document = web_sys::window().expect("Unable to get window").document().expect("Unable to get document");
 
         // test button
-        let button_element = document.get_element_by_id("test-button").expect("Unable to get test button");
-        let button = button_element.dyn_ref::<HtmlButtonElement>().expect("Unable to convert element into a button").clone();
+        let button = get_html_element_by_id::<HtmlButtonElement>(&document, "test-button");
         let planet_sim = state.planet_sim.clone();
-        let closure = Closure::wrap(Box::new(move || {
+        let button_onclick = move || {
             error!("Button Clicked!! {:?}", &planet_sim.lock().unwrap().get_focused().unwrap().label);
-        }) as Box<dyn Fn()>);
-        button.set_onclick(Some(closure.as_ref().unchecked_ref()));
-        closure.forget();
+        };
+        register_js_callback(&button, HtmlElement::set_onclick, button_onclick);
 
         // timescale adjuster
-        let timescale_element = document.get_element_by_id("dt-input").expect("Unable to get timescale input");
-        let timescale_input = timescale_element.dyn_ref::<HtmlInputElement>().expect("Unable to convert element into an input").clone();
+        let timescale_input = get_html_element_by_id::<HtmlInputElement>(&document, "dt-input");
         let sec_per_sec = state.sec_per_sec.clone();
-        let closure = Closure::wrap(Box::new(move |event: web_sys::Event| {
+        let timescale_onchange = move |event: web_sys::Event| {
             let target = event.target().unwrap();
             let input_element = target.dyn_into::<HtmlInputElement>().unwrap();
             let value = input_element.value();
@@ -983,9 +1020,8 @@ pub async fn run() {
             } else {
                 error!("{} is not a valid timescale", value);
             }
-        }) as Box<dyn FnMut(_)>);
-        timescale_input.set_onchange(Some(closure.as_ref().unchecked_ref()));
-        closure.forget();
+        };
+        register_js_callback_with_event(&timescale_input, HtmlElement::set_onchange, timescale_onchange);
     } 
 
     event_loop.run(move |event, control_flow| {
