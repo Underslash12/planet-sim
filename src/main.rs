@@ -1,6 +1,5 @@
 // main.rs
 
-use cgmath::Zero;
 use planet_sim::run;
 mod sim;
 

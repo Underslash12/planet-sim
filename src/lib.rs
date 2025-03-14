@@ -8,6 +8,7 @@ use core::f32;
 use std::{collections::VecDeque, f32::consts::PI};
 use web_time::{Instant, Duration};
 use std::thread;
+use std::sync::{Arc, Mutex};
 
 use winit::{
     dpi::PhysicalSize, event::*, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
@@ -18,7 +19,7 @@ use cgmath::{perspective, prelude::*, Point3, Rad, Deg, Vector3, Vector4, Matrix
 #[cfg(target_arch="wasm32")]
 use wasm_bindgen::{prelude::*, JsCast};
 #[cfg(target_arch="wasm32")]
-use web_sys::HtmlButtonElement;
+use web_sys::{HtmlButtonElement, HtmlInputElement};
 
 mod texture;
 mod sim;
@@ -440,7 +441,8 @@ struct State<'a> {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     // instances: Vec<Instance>,
-    planet_sim: PlanetSim,
+    planet_sim: Arc<Mutex<PlanetSim>>,
+    sec_per_sec: Arc<Mutex<u32>>,
     instance_buffer: wgpu::Buffer,
 }
 
@@ -759,7 +761,8 @@ impl<'a> State<'a> {
             camera_bind_group,
             // instances,
             instance_buffer,
-            planet_sim, 
+            planet_sim: Arc::new(Mutex::new(planet_sim)), 
+            sec_per_sec: Arc::new(Mutex::new(1)),
         }
     }
 
@@ -790,11 +793,12 @@ impl<'a> State<'a> {
         self.frame_counter.update();
 
         self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform.update_view_proj(&self.camera, self.planet_sim.get_focused().unwrap().get_low_precision_position());
+        self.camera.aspect = self.config.width as f32 / self.config.height as f32;
+        self.camera_uniform.update_view_proj(&self.camera, self.planet_sim.lock().unwrap().get_focused().unwrap().get_low_precision_position());
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
 
-        self.planet_sim.update(self.frame_counter.delta_time());
-        let instance_data = self.planet_sim.instance_data();
+        self.planet_sim.lock().unwrap().update(*self.sec_per_sec.lock().unwrap() * self.frame_counter.clamped_delta_time());
+        let instance_data = self.planet_sim.lock().unwrap().instance_data();
         self.queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instance_data));
     }
 
@@ -856,7 +860,7 @@ impl<'a> State<'a> {
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); 
             // instead of using draw, since we are using an index buffer, we have to use draw_indexed
             // render_pass.draw_indexed(0..self.num_indices, 0, 0..1);      
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.planet_sim.len() as u32);      
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.planet_sim.lock().unwrap().len() as u32);      
         }
         
         // submit will accept anything that implements IntoIter
@@ -897,7 +901,7 @@ pub async fn run() {
         let _ = window.request_inner_size(PhysicalSize::new(640, 640));
         
         use winit::platform::web::WindowExtWebSys;
-        use web_sys::{Element, HtmlButtonElement};
+        use web_sys::{Element, HtmlButtonElement, Node};
 
         // get the html document
         let document = web_sys::window().expect("Unable to get window").document().expect("Unable to get document");
@@ -905,16 +909,9 @@ pub async fn run() {
         // construct the canvas from the winit window
         let body = document.get_element_by_id("planet-sim").expect("Unable to get document body");
         let canvas = Element::from(window.canvas().expect("Unable to create winit canvas"));
-        body.append_child(&canvas).expect("Failed to append canvas to document body");
-
-        // test button
-        let button_element = document.get_element_by_id("test-button").expect("Unable to get test button");
-        let button = button_element.dyn_ref::<HtmlButtonElement>().expect("Unable to convert element into a button").clone();
-        let closure = Closure::wrap(Box::new(move || {
-            error!("Button Clicked!!");
-        }) as Box<dyn Fn()>);
-        button.set_onclick(Some(closure.as_ref().unchecked_ref()));
-        closure.forget();
+        // body.append_child(&canvas).expect("Failed to append canvas to document body");
+        let first_child = body.child_nodes().item(0).expect("Couldn't get child 0 of body");
+        body.insert_before(&canvas, Some(&first_child)).expect("Failed to insert canvas into document body");
     } 
 
     // test planet sim
@@ -955,6 +952,41 @@ pub async fn run() {
     // create the state
     let mut state = State::new(&window, planet_sim).await;
     let mut surface_configured = false;
+
+    // add events to the html elements
+    #[cfg(target_arch = "wasm32")]
+    {
+        // get the html document
+        let document = web_sys::window().expect("Unable to get window").document().expect("Unable to get document");
+
+        // test button
+        let button_element = document.get_element_by_id("test-button").expect("Unable to get test button");
+        let button = button_element.dyn_ref::<HtmlButtonElement>().expect("Unable to convert element into a button").clone();
+        let planet_sim = state.planet_sim.clone();
+        let closure = Closure::wrap(Box::new(move || {
+            error!("Button Clicked!! {:?}", &planet_sim.lock().unwrap().get_focused().unwrap().label);
+        }) as Box<dyn Fn()>);
+        button.set_onclick(Some(closure.as_ref().unchecked_ref()));
+        closure.forget();
+
+        // timescale adjuster
+        let timescale_element = document.get_element_by_id("dt-input").expect("Unable to get timescale input");
+        let timescale_input = timescale_element.dyn_ref::<HtmlInputElement>().expect("Unable to convert element into an input").clone();
+        let sec_per_sec = state.sec_per_sec.clone();
+        let closure = Closure::wrap(Box::new(move |event: web_sys::Event| {
+            let target = event.target().unwrap();
+            let input_element = target.dyn_into::<HtmlInputElement>().unwrap();
+            let value = input_element.value();
+            if let Ok(dt) = value.parse::<u32>() {
+                *sec_per_sec.lock().unwrap() = dt;
+                error!("New timescale: {}sec/sec", dt);
+            } else {
+                error!("{} is not a valid timescale", value);
+            }
+        }) as Box<dyn FnMut(_)>);
+        timescale_input.set_onchange(Some(closure.as_ref().unchecked_ref()));
+        closure.forget();
+    } 
 
     event_loop.run(move |event, control_flow| {
         match event {

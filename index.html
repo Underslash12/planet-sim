@@ -8,15 +8,31 @@
     <title>Planet Sim</title>
     <link rel="icon" type="image/x-icon" href="./images/icon1.ico">
     <style>
+        body {
+            display: flex;
+            margin: 0;
+            padding: 0;
+        }
         canvas {
             background-color: black;
-            width: 640px;
-            height: 640px;
+            flex: 4;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            max-width: 2048px;
+            max-height: 2048px;
         }
         /* add the following to disable the select outline */
-        /* canvas:focus, canvas:active {
+        canvas:focus, canvas:active {
             outline: none;
-        } */
+        }
+
+        #control-panel {
+            flex: 1;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+        }
     </style>
 </head>
 
@@ -28,7 +44,10 @@
             console.log("WASM Loaded");
         });
     </script>
-    <button id="test-button" onclick="testClick()">Test Button</button>
+    <div id="control-panel">
+        <button id="test-button" onclick="testClick()">Test Button</button>
+        <input id="dt-input">
+    </div>
 </body>
 
 </html>
