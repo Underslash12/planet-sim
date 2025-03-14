@@ -2,15 +2,12 @@
 
 use env_logger::init;
 use log::{error, info};
-use wasm_bindgen::closure;
-use web_sys::Document;
 use core::f32;
 use std::{collections::VecDeque, f32::consts::PI};
-use web_time::{web, Duration, Instant};
+use web_time::{Duration, Instant};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::any::type_name;
-use std::ops::Deref;
 
 use winit::{
     dpi::PhysicalSize, event::*, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
@@ -18,41 +15,44 @@ use winit::{
 use wgpu::{util::DeviceExt, vertex_attr_array};
 use cgmath::{perspective, prelude::*, Point3, Rad, Deg, Vector3, Vector4, Matrix4, Quaternion};
 
+#[cfg(target_arch="wasm32")]    
+use wasm_bindgen::{prelude::*, JsCast, closure};
 #[cfg(target_arch="wasm32")]
-use wasm_bindgen::{prelude::*, JsCast};
-#[cfg(target_arch="wasm32")]
-use web_sys::{HtmlButtonElement, HtmlInputElement, HtmlElement};
+use web_sys::{HtmlButtonElement, HtmlInputElement, HtmlElement, Document};
 
 mod texture;
+mod model;
+use model::Vertex;
+mod resources;
 mod sim;
 use sim::{AstroBody, AstroBodyInstanceRaw, PlanetSim};
 
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
+// #[repr(C)]
+// #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+// struct Vertex {
+//     position: [f32; 3],
+//     tex_coords: [f32; 2],
+// }
 
-impl Vertex {
-    // two attributes, the first being the position, and the second the texture coordinates
-    // attributes are what is referenced by @location in the wgsl shader code, and are shared between
-    // different invocations (not sure if also shared over different shader types)
-    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
-        vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+// impl Vertex {
+//     // two attributes, the first being the position, and the second the texture coordinates
+//     // attributes are what is referenced by @location in the wgsl shader code, and are shared between
+//     // different invocations (not sure if also shared over different shader types)
+//     const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+//         vertex_attr_array![0 => Float32x3, 1 => Float32x2];
 
-    // get the vertexbufferlayout associated with the Vertex struct
-    // the vertexbufferlayout is just how each vertex is laid out within the buffer
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            // the attributes specify how each vertex should be further divided
-            attributes: &Self::ATTRIBUTES,
-        }
-    }
-}
+//     // get the vertexbufferlayout associated with the Vertex struct
+//     // the vertexbufferlayout is just how each vertex is laid out within the buffer
+//     fn desc() -> wgpu::VertexBufferLayout<'static> {
+//         wgpu::VertexBufferLayout {
+//             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+//             step_mode: wgpu::VertexStepMode::Vertex,
+//             // the attributes specify how each vertex should be further divided
+//             attributes: &Self::ATTRIBUTES,
+//         }
+//     }
+// }
 
 // // a simple pentagon
 // const VERTICES: &[Vertex] = &[
@@ -71,37 +71,37 @@ impl Vertex {
 // ];
 
 // a cube
-const VERTICES: &[Vertex] = &[
-    Vertex { position: [-1.0, -1.0, -1.0], tex_coords: [-1.0, -1.0], }, 
-    Vertex { position: [1.0, -1.0, -1.0], tex_coords: [1.0, -1.0], }, 
-    Vertex { position: [-1.0, -1.0, 1.0], tex_coords: [-1.0, 1.0], }, 
-    Vertex { position: [1.0, -1.0, 1.0], tex_coords: [1.0, 1.0], }, 
-    Vertex { position: [-1.0, 1.0, -1.0], tex_coords: [-1.0, -1.0], }, 
-    Vertex { position: [1.0, 1.0, -1.0], tex_coords: [1.0, -1.0], }, 
-    Vertex { position: [-1.0, 1.0, 1.0], tex_coords: [-1.0, 1.0], }, 
-    Vertex { position: [1.0, 1.0, 1.0], tex_coords: [1.0, 1.0], }, 
-];
+// const VERTICES: &[Vertex] = &[
+//     Vertex { position: [-1.0, -1.0, -1.0], tex_coords: [-1.0, -1.0], }, 
+//     Vertex { position: [1.0, -1.0, -1.0], tex_coords: [1.0, -1.0], }, 
+//     Vertex { position: [-1.0, -1.0, 1.0], tex_coords: [-1.0, 1.0], }, 
+//     Vertex { position: [1.0, -1.0, 1.0], tex_coords: [1.0, 1.0], }, 
+//     Vertex { position: [-1.0, 1.0, -1.0], tex_coords: [-1.0, -1.0], }, 
+//     Vertex { position: [1.0, 1.0, -1.0], tex_coords: [1.0, -1.0], }, 
+//     Vertex { position: [-1.0, 1.0, 1.0], tex_coords: [-1.0, 1.0], }, 
+//     Vertex { position: [1.0, 1.0, 1.0], tex_coords: [1.0, 1.0], }, 
+// ];
 
-const INDICES: &[u16] = &[
-    // bottom
-    0, 1, 3,
-    0, 3, 2,
-    // front
-    0, 5, 1,
-    0, 4, 5,
-    // left
-    0, 2, 4,
-    2, 6, 4,
-    // back
-    2, 7, 6,
-    2, 3, 7,
-    // right
-    1, 7, 3,
-    1, 5, 7,
-    // top
-    4, 7, 5,
-    4, 6, 7,
-];
+// const INDICES: &[u16] = &[
+//     // bottom
+//     0, 1, 3,
+//     0, 3, 2,
+//     // front
+//     0, 5, 1,
+//     0, 4, 5,
+//     // left
+//     0, 2, 4,
+//     2, 6, 4,
+//     // back
+//     2, 7, 6,
+//     2, 3, 7,
+//     // right
+//     1, 7, 3,
+//     1, 5, 7,
+//     // top
+//     4, 7, 5,
+//     4, 6, 7,
+// ];
 
 
 // now camera stuff
@@ -436,10 +436,11 @@ struct State<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     window: &'a Window,
     render_pipeline: wgpu::RenderPipeline,
-    num_vertices: u32,
-    vertex_buffer: wgpu::Buffer,
-    num_indices: u32,
-    index_buffer: wgpu::Buffer, 
+    // num_vertices: u32,
+    // vertex_buffer: wgpu::Buffer,
+    // num_indices: u32,
+    // index_buffer: wgpu::Buffer, 
+    obj_model: model::Model,
     diffuse_bind_group: wgpu::BindGroup,
     diffuse_texture: texture::Texture,
     depth_texture: texture::Texture,
@@ -657,6 +658,10 @@ impl<'a> State<'a> {
         // depth texture stuff
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
+        let obj_model =
+            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
+                .await
+                .unwrap();
 
 
         // the layout for the pipeline, useful for hotswapping pipelines i think
@@ -678,7 +683,7 @@ impl<'a> State<'a> {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 buffers: &[
-                    Vertex::desc(),
+                    model::ModelVertex::desc(),
                     AstroBodyInstanceRaw::desc(),
                 ],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -722,28 +727,28 @@ impl<'a> State<'a> {
             cache: None, 
         });
 
-        // want to store the number of vertices for rendering
-        let num_vertices = VERTICES.len() as u32;
-        // create a vertex buffer for, you guessed it, the vertices
-        let vertex_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(VERTICES),
-                usage: wgpu::BufferUsages::VERTEX,
-            }
-        );
+        // // want to store the number of vertices for rendering
+        // let num_vertices = VERTICES.len() as u32;
+        // // create a vertex buffer for, you guessed it, the vertices
+        // let vertex_buffer = device.create_buffer_init(
+        //     &wgpu::util::BufferInitDescriptor {
+        //         label: Some("Vertex Buffer"),
+        //         contents: bytemuck::cast_slice(VERTICES),
+        //         usage: wgpu::BufferUsages::VERTEX,
+        //     }
+        // );
 
-        // number of indices
-        let num_indices = INDICES.len() as u32;
-        // index buffer to reuse the vertices
-        // though an index buffer still has some waste, it wastes 2 bytes per vertex instead of sizeof(vec3f) = 12 bytes per vertex
-        let index_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(INDICES),
-                usage: wgpu::BufferUsages::INDEX,
-            }
-        );
+        // // number of indices
+        // let num_indices = INDICES.len() as u32;
+        // // index buffer to reuse the vertices
+        // // though an index buffer still has some waste, it wastes 2 bytes per vertex instead of sizeof(vec3f) = 12 bytes per vertex
+        // let index_buffer = device.create_buffer_init(
+        //     &wgpu::util::BufferInitDescriptor {
+        //         label: Some("Index Buffer"),
+        //         contents: bytemuck::cast_slice(INDICES),
+        //         usage: wgpu::BufferUsages::INDEX,
+        //     }
+        // );
             
         // create the state
         State {
@@ -755,10 +760,11 @@ impl<'a> State<'a> {
             size,
             window,
             render_pipeline,
-            num_vertices,
-            vertex_buffer,
-            num_indices,
-            index_buffer,
+            // num_vertices,
+            // vertex_buffer,
+            // num_indices,
+            // index_buffer,
+            obj_model,
             diffuse_bind_group,
             diffuse_texture,
             depth_texture,
@@ -857,18 +863,29 @@ impl<'a> State<'a> {
 
             render_pass.set_pipeline(&self.render_pipeline); 
             // add in a bind group for our texture
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            // set the bind group for our camera binding
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            // need to actually assign the buffer we created to the renderer (since it needs a specific slot)
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            // set the index buffer to be slot 1
+            // render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            // // set the bind group for our camera binding
+            // render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+            // // need to actually assign the buffer we created to the renderer (since it needs a specific slot)
+            // render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            // set the instance buffer to be slot 1
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            // as with the vertex buffer, we have to set the active index buffer, but this time there is only one slot (hence active)
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); 
+            // // as with the vertex buffer, we have to set the active index buffer, but this time there is only one slot (hence active)
+            // render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); 
             // instead of using draw, since we are using an index buffer, we have to use draw_indexed
             // render_pass.draw_indexed(0..self.num_indices, 0, 0..1);      
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.planet_sim.lock().unwrap().len() as u32);      
+            // render_pass.draw_indexed(0..self.num_indices, 0, 0..self.planet_sim.lock().unwrap().len() as u32);  
+            
+            use model::DrawModel;
+            // let mesh = &self.obj_model.meshes[0];
+            // let material = &self.obj_model.materials[mesh.material];
+            // render_pass.draw_mesh_instanced(mesh, material, 0..self.planet_sim.lock().unwrap().len() as u32, &self.camera_bind_group);
+
+            render_pass.draw_model_instanced(
+                &self.obj_model,
+                0..self.planet_sim.lock().unwrap().len() as u32,
+                &self.camera_bind_group,
+            );
         }
         
         // submit will accept anything that implements IntoIter
@@ -881,6 +898,7 @@ impl<'a> State<'a> {
 
 
 // get a generic html element by id using web_sys
+#[cfg(target_arch = "wasm32")]
 fn get_html_element_by_id<T: JsCast + Clone>(doc: &Document, id: &str) -> T {
     let element: web_sys::Element = doc.get_element_by_id(id).expect(&format!("Unable to get element {}", id));
     element.dyn_ref::<T>().expect(&format!("Unable to convert {} of type web_sys::Element into type {}", id, type_name::<T>())).clone()
@@ -888,6 +906,7 @@ fn get_html_element_by_id<T: JsCast + Clone>(doc: &Document, id: &str) -> T {
 
 // given an element and an htmlelement event, register some callback with it
 // this is complicated, and if it breaks, go back to "text input working" on branch js_bindings for a working but more repetitive method 
+#[cfg(target_arch = "wasm32")]
 fn register_js_callback<'a, E, F, C>(element: &'a E, event_function: F, callback: C) 
     where 
         E: AsRef<HtmlElement>,
@@ -900,6 +919,7 @@ fn register_js_callback<'a, E, F, C>(element: &'a E, event_function: F, callback
 }
 
 // given an element and an htmlelement event, register some callback with it where the callback can also access a web_sys::event parameter
+#[cfg(target_arch = "wasm32")]
 fn register_js_callback_with_event<'a, E, F, C>(element: &'a E, event_function: F, callback: C) 
     where 
         E: AsRef<HtmlElement>,

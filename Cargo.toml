@@ -21,6 +21,9 @@ bytemuck = { version = "1.16", features = [ "derive" ] }
 anyhow = "1.0"
 cgmath = { version = "0.18", features = ["swizzle"] }
 web-time = "1.1.0"
+tobj = { version = "3.2", default-features = false, features = ["async"]}
+fs_extra = "1.2"
+glob = "0.3"
 
 # image crate dependencies
 [dependencies.image]
@@ -44,4 +47,6 @@ web-sys = { version = "0.3", features = [
     "NodeList",
     "HtmlInputElement",
     "HtmlElement",
+    "Location",
 ]}
+reqwest = { version = "0.11" }

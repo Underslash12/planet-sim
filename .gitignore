@@ -12,3 +12,5 @@
 
 # and 3d files
 *.obj
+/res
+/resources
