@@ -9,3 +9,6 @@
 
 # also ignore text files
 *.txt
+
+# and 3d files
+*.obj
