@@ -1,7 +1,8 @@
 // texture.rs
 
-use image::GenericImageView;
+use image::{DynamicImage, GenericImageView};
 use anyhow::*;
+use wgpu::TextureViewDimension;
 
 // texture struct which also holds the sampler and view since they are related
 pub struct Texture {
@@ -22,6 +23,21 @@ impl Texture {
     ) -> Result<Self> {
         let img = image::load_from_memory(bytes)?;
         Self::from_image(device, queue, &img, Some(label))
+    }
+
+    pub fn from_bytes_array(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bytes: &[&[u8]], 
+        label: &str
+    ) -> Result<Self> {
+        let mut img_vec = Vec::new();
+        for texture_bytes in bytes {
+            let img = image::load_from_memory(texture_bytes)?;
+            img_vec.push(img);
+        }
+        let img_vec_refs = img_vec.iter().collect::<Vec<&DynamicImage>>();
+        Self::from_image_array(device, queue, &img_vec_refs[..], Some(label))
     }
 
     pub fn from_image(
@@ -68,6 +84,86 @@ impl Texture {
         );
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(
+            &wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            }
+        );
+
+        Ok(Self { texture, view, sampler })
+    }
+
+    // this will create a 3D texture regardless of whether or not there is more than 1 texture
+    pub fn from_image_array(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        imgs: &[&image::DynamicImage],
+        label: Option<&str>
+    ) -> Result<Self> {
+        // make sure there is at least one texture, and every texture in the texture array has the same size
+        {
+            assert!(imgs.len() > 0);
+            let dimensions = imgs[0].dimensions();
+            for i in 0..imgs.len() {
+                assert!(imgs[i].dimensions() == dimensions);
+            }
+        }
+
+        let dimensions = imgs[0].dimensions(); 
+        let layers = imgs.len() as u32;
+
+        let size = wgpu::Extent3d {
+            width: dimensions.0,
+            height: dimensions.1,
+            depth_or_array_layers: layers,
+        };
+        let texture = device.create_texture(
+            &wgpu::TextureDescriptor {
+                label,
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            }
+        );
+        
+        for i in 0..imgs.len() {
+            let rgba = imgs[i].to_rgba8();
+
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    aspect: wgpu::TextureAspect::All,
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: i as u32 },
+                },
+                &rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * dimensions.0),
+                    rows_per_image: Some(dimensions.1),
+                },
+                wgpu::Extent3d {
+                    width: dimensions.0,
+                    height: dimensions.1,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        // &wgpu::TextureViewDescriptor::default()
+        let view = texture.create_view(&wgpu::TextureViewDescriptor{
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
         let sampler = device.create_sampler(
             &wgpu::SamplerDescriptor {
                 address_mode_u: wgpu::AddressMode::ClampToEdge,

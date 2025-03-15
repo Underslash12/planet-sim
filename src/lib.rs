@@ -444,6 +444,9 @@ struct State<'a> {
     diffuse_bind_group: wgpu::BindGroup,
     diffuse_texture: texture::Texture,
     depth_texture: texture::Texture,
+    // texture_array: texture::Texture,
+    // texture_array_bind_group: wgpu::BindGroup,
+    texture_array_material: model::Material,
     camera: Camera,
     camera_controller: CameraController,
     camera_uniform: CameraUniform,
@@ -582,6 +585,52 @@ impl<'a> State<'a> {
                 label: Some("diffuse_bind_group"),
             }
         );
+
+        // let test_texture_array = texture::Texture::from_bytes_array(&device, &queue, bytes, "planet_texture_array");
+        let texture_array = resources::load_texture_array(&["textures/2k_mercury.jpg", "textures/2k_venus_atmosphere.jpg"], &device, &queue, "planet_texture_array").await.unwrap();
+        
+        let texture_array_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2Array,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        // This should match the filterable field of the
+                        // corresponding Texture entry above.
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_array_bind_group_layout"),
+            });
+            
+        // create the bind group using the above layout
+        let texture_array_bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: &texture_array_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&texture_array.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(&texture_array.sampler),
+                    }
+                ],
+                label: Some("texture_array_bind_group"),
+            }
+        );
         
         // create the camera
         let camera = Camera {
@@ -659,7 +708,7 @@ impl<'a> State<'a> {
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
         let obj_model =
-            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
+            resources::load_model("cube/cube.obj", &device, &queue, &texture_bind_group_layout)
                 .await
                 .unwrap();
 
@@ -671,6 +720,7 @@ impl<'a> State<'a> {
                 bind_group_layouts: &[
                     &texture_bind_group_layout,
                     &camera_bind_group_layout,
+                    &texture_array_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -750,6 +800,12 @@ impl<'a> State<'a> {
         //     }
         // );
             
+        let texture_array_material = model::Material {
+            name: String::from("PlanetTextureMaterial"),
+            diffuse_texture: texture_array,
+            bind_group: texture_array_bind_group,
+        };
+
         // create the state
         State {
             frame_counter: FrameCounter::new(),
@@ -768,6 +824,9 @@ impl<'a> State<'a> {
             diffuse_bind_group,
             diffuse_texture,
             depth_texture,
+            // texture_array,
+            // texture_array_bind_group,
+            texture_array_material,
             camera,
             camera_controller,
             camera_uniform,
@@ -863,7 +922,7 @@ impl<'a> State<'a> {
 
             render_pass.set_pipeline(&self.render_pipeline); 
             // add in a bind group for our texture
-            // render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             // // set the bind group for our camera binding
             // render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             // // need to actually assign the buffer we created to the renderer (since it needs a specific slot)
@@ -877,15 +936,15 @@ impl<'a> State<'a> {
             // render_pass.draw_indexed(0..self.num_indices, 0, 0..self.planet_sim.lock().unwrap().len() as u32);  
             
             use model::DrawModel;
-            // let mesh = &self.obj_model.meshes[0];
-            // let material = &self.obj_model.materials[mesh.material];
+            let mesh = &self.obj_model.meshes[0];
+            render_pass.draw_mesh_instanced(mesh, &self.texture_array_material, 0..self.planet_sim.lock().unwrap().len() as u32, &self.camera_bind_group);
             // render_pass.draw_mesh_instanced(mesh, material, 0..self.planet_sim.lock().unwrap().len() as u32, &self.camera_bind_group);
 
-            render_pass.draw_model_instanced(
-                &self.obj_model,
-                0..self.planet_sim.lock().unwrap().len() as u32,
-                &self.camera_bind_group,
-            );
+            // render_pass.draw_model_instanced(
+            //     &self.obj_model,
+            //     0..self.planet_sim.lock().unwrap().len() as u32,
+            //     &self.camera_bind_group,
+            // );
         }
         
         // submit will accept anything that implements IntoIter

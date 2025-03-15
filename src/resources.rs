@@ -1,6 +1,7 @@
 // resources.rs
 
 use std::io::{BufReader, Cursor};
+use cgmath::num_traits::ops::bytes;
 use log::error;
 
 use cfg_if::cfg_if;
@@ -15,7 +16,7 @@ fn format_url(file_name: &str) -> reqwest::Url {
     let location = window.location();
     let mut origin = location.origin().unwrap();
     // error!("Location: {:?}, File_name: {:?}", origin, file_name);
-    let base = reqwest::Url::parse(&format!("{}/resources/cube/", origin,)).unwrap();
+    let base = reqwest::Url::parse(&format!("{}/resources/", origin,)).unwrap();
     base.join(file_name).unwrap()
 }
 
@@ -31,9 +32,8 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
             // let path = std::path::Path::new(env!("OUT_DIR"))
             let path = std::path::Path::new(".\\")
                 .join("resources")
-                .join("cube")
                 .join(file_name);
-            // println!("{:?}", path);
+            println!("{:?}", path);
             let txt = std::fs::read_to_string(path)?;
         }
     }
@@ -54,9 +54,8 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
             // let path = std::path::Path::new(env!("OUT_DIR"))
             let path = std::path::Path::new(".\\")
                 .join("resources")
-                .join("cube")
                 .join(file_name);
-            // println!("{:?}", path);
+            println!("{:?}", path);
             let data = std::fs::read(path)?;
         }
     }
@@ -72,6 +71,29 @@ pub async fn load_texture(
     let data = load_binary(file_name).await?;
     texture::Texture::from_bytes(device, queue, &data, file_name)
 }
+
+pub async fn load_texture_array(
+    file_names: &[&str],
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+) -> anyhow::Result<texture::Texture> {
+    let mut bytes_data = Vec::new();
+    for file_name in file_names {
+        bytes_data.push(load_binary(file_name).await?);
+    }
+    let bytes_array: Vec<&[u8]> = bytes_data.iter().map(|img_bytes| &img_bytes[..]).collect();
+    texture::Texture::from_bytes_array(device, queue, &bytes_array[..], label)
+}
+
+// pub async fn load_mesh(
+//     file_name: &str,
+//     device: &wgpu::Device,
+//     queue: &wgpu::Queue,
+//     layout: &wgpu::BindGroupLayout,
+// ) -> anyhow::Result<model::Mesh> {
+
+// }
 
 pub async fn load_model(
     file_name: &str,
@@ -98,29 +120,29 @@ pub async fn load_model(
     .await?;
 
     let mut materials = Vec::new();
-    for m in obj_materials? {
-        let diffuse_texture = load_texture(&m.diffuse_texture, device, queue).await?;
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-            ],
-            label: None,
-        });
+    // for m in obj_materials? {
+    //     let diffuse_texture = load_texture(&m.diffuse_texture, device, queue).await?;
+    //     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    //         layout,
+    //         entries: &[
+    //             wgpu::BindGroupEntry {
+    //                 binding: 0,
+    //                 resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+    //             },
+    //             wgpu::BindGroupEntry {
+    //                 binding: 1,
+    //                 resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+    //             },
+    //         ],
+    //         label: None,
+    //     });
 
-        materials.push(model::Material {
-            name: m.name,
-            diffuse_texture,
-            bind_group,
-        })
-    }
+    //     materials.push(model::Material {
+    //         name: m.name,
+    //         diffuse_texture,
+    //         bind_group,
+    //     })
+    // }
 
     let meshes = models
         .into_iter()
@@ -171,11 +193,10 @@ pub async fn load_model(
                 vertex_buffer,
                 index_buffer,
                 num_elements: m.mesh.indices.len() as u32,
-                material: m.mesh.material_id.unwrap_or(0),
+                // material: m.mesh.material_id.unwrap_or(0),
             }
         })
         .collect::<Vec<_>>();
 
     Ok(model::Model { meshes, materials })
 }
-
