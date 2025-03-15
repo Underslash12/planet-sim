@@ -28,82 +28,6 @@ mod sim;
 use sim::{AstroBody, AstroBodyInstanceRaw, PlanetSim};
 
 
-// #[repr(C)]
-// #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-// struct Vertex {
-//     position: [f32; 3],
-//     tex_coords: [f32; 2],
-// }
-
-// impl Vertex {
-//     // two attributes, the first being the position, and the second the texture coordinates
-//     // attributes are what is referenced by @location in the wgsl shader code, and are shared between
-//     // different invocations (not sure if also shared over different shader types)
-//     const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
-//         vertex_attr_array![0 => Float32x3, 1 => Float32x2];
-
-//     // get the vertexbufferlayout associated with the Vertex struct
-//     // the vertexbufferlayout is just how each vertex is laid out within the buffer
-//     fn desc() -> wgpu::VertexBufferLayout<'static> {
-//         wgpu::VertexBufferLayout {
-//             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-//             step_mode: wgpu::VertexStepMode::Vertex,
-//             // the attributes specify how each vertex should be further divided
-//             attributes: &Self::ATTRIBUTES,
-//         }
-//     }
-// }
-
-// // a simple pentagon
-// const VERTICES: &[Vertex] = &[
-//     Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 1.0 - 0.99240386], }, // A
-//     Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 1.0 - 0.56958647], }, // B
-//     Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 1.0 - 0.05060294], }, // C
-//     Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 1.0 - 0.1526709], }, // D
-//     Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 1.0 - 0.7347359], }, // E
-// ];
-
-// // vertex buffer indices
-// const INDICES: &[u16] = &[
-//     0, 1, 4,
-//     1, 2, 4,
-//     2, 3, 4,
-// ];
-
-// a cube
-// const VERTICES: &[Vertex] = &[
-//     Vertex { position: [-1.0, -1.0, -1.0], tex_coords: [-1.0, -1.0], }, 
-//     Vertex { position: [1.0, -1.0, -1.0], tex_coords: [1.0, -1.0], }, 
-//     Vertex { position: [-1.0, -1.0, 1.0], tex_coords: [-1.0, 1.0], }, 
-//     Vertex { position: [1.0, -1.0, 1.0], tex_coords: [1.0, 1.0], }, 
-//     Vertex { position: [-1.0, 1.0, -1.0], tex_coords: [-1.0, -1.0], }, 
-//     Vertex { position: [1.0, 1.0, -1.0], tex_coords: [1.0, -1.0], }, 
-//     Vertex { position: [-1.0, 1.0, 1.0], tex_coords: [-1.0, 1.0], }, 
-//     Vertex { position: [1.0, 1.0, 1.0], tex_coords: [1.0, 1.0], }, 
-// ];
-
-// const INDICES: &[u16] = &[
-//     // bottom
-//     0, 1, 3,
-//     0, 3, 2,
-//     // front
-//     0, 5, 1,
-//     0, 4, 5,
-//     // left
-//     0, 2, 4,
-//     2, 6, 4,
-//     // back
-//     2, 7, 6,
-//     2, 3, 7,
-//     // right
-//     1, 7, 3,
-//     1, 5, 7,
-//     // top
-//     4, 7, 5,
-//     4, 6, 7,
-// ];
-
-
 // now camera stuff
 // camera matrix for converting between camera types
 #[rustfmt::skip]
@@ -129,11 +53,12 @@ struct Camera {
 }
 
 impl Camera {
-    fn build_view_projection_matrix(&self, offset: Vector3<f32>) -> Matrix4<f32> {
+    // no offset needed since the camera is (in this case) always going to "targeting" something around 0
+    fn build_view_projection_matrix(&self) -> Matrix4<f32> {
         // let view = Matrix4::look_at_rh(self.eye, self.target, self.up);
         
         // want to convert from world space to cam space, so compute the inverse of what we normally would
-        let translation_inv = Matrix4::from_translation(-self.pos + (-offset));
+        let translation_inv = Matrix4::from_translation(-self.pos);
         let yaw_inv = Matrix4::from_angle_y(Rad(self.yaw)).transpose();
         let pitch_inv = Matrix4::from_angle_x(Rad(self.pitch)).transpose();
         // let initial_rotation: Matrix4<f32> = Matrix4::look_at_rh(Point3::from_vec(Vector3::zero()), Point3::from_vec(Vector3::unit_z()), self.up);
@@ -169,8 +94,8 @@ impl CameraUniform {
         }
     }
 
-    fn update_view_proj(&mut self, camera: &Camera, offset: Vector3<f32>) {
-        self.view_proj = camera.build_view_projection_matrix(offset).into();
+    fn update_view_proj(&mut self, camera: &Camera) {
+        self.view_proj = camera.build_view_projection_matrix().into();
     }
 }
 
@@ -329,14 +254,16 @@ impl CameraInput {
 
 struct CameraController {
     input: CameraInput, 
-    speed: f32,
+    translation_speed: f32,
+    rotation_speed: f32
 }
 
 impl CameraController {
-    fn new(speed: f32) -> CameraController {
+    fn new(translation_speed: f32, rotation_speed: f32) -> CameraController {
         CameraController {
             input: CameraInput::new(),
-            speed,
+            translation_speed,
+            rotation_speed,
         }
     }
 
@@ -344,10 +271,11 @@ impl CameraController {
         self.input.process_events(event)
     }
 
-    fn update_camera(&self, camera: &mut Camera) {
+    // update the position of the camera based on inputs and collisions with the planets
+    fn update_camera(&self, camera: &mut Camera, planet_sim: &PlanetSim) {
         // update the position
         // have to perform a change of basis to get to camera space
-        let translation_vector = self.speed * Vector4::new(
+        let translation_vector = self.translation_speed * Vector4::new(
             self.input.move_right_input(), 
             0.0,
             self.input.move_forward_input(),
@@ -357,12 +285,32 @@ impl CameraController {
         // i personally want the up and down not to depend on camera orientation, but maybe ill make that a toggle
         let yaw = Matrix4::from_angle_y(Rad(camera.yaw));
         camera.pos += (yaw * translation_vector).xyz();
-        camera.pos.y += self.input.move_up_input() * self.speed;
+        camera.pos.y += self.input.move_up_input() * self.translation_speed;
+
+        // handle collisions
+        for obj in &planet_sim.objects {
+            let obj_pos = obj.get_low_precision_position(planet_sim.render_scale);
+            let radius_in_camera_space = (obj.radius / planet_sim.render_scale) as f32;
+
+            // if camera is too close to the surface of the planet, push it back out along the vector between it and the planet
+            // "too close" being around 3 * znear above the surface, and less and the camera clips
+            let closest_dist = radius_in_camera_space + 3.0 * camera.znear;
+            if camera.pos.distance(obj_pos) < closest_dist {
+                let dir = {
+                    if camera.pos - obj_pos == Vector3::zero() {
+                        Vector3::unit_z()
+                    } else {
+                        (camera.pos - obj_pos).normalize()
+                    }
+                };
+                camera.pos = obj_pos + closest_dist * dir;
+            }   
+        }
 
         // update the rotation
-        camera.yaw += self.input.turn_right_input() * self.speed;
+        camera.yaw += self.input.turn_right_input() * self.rotation_speed;
         camera.yaw %= 2.0 * f32::consts::PI;
-        camera.pitch += self.input.turn_up_input() * self.speed;
+        camera.pitch += self.input.turn_up_input() * self.rotation_speed;
         camera.pitch = camera.pitch.clamp(-f32::consts::PI / 2.0, f32::consts::PI / 2.0);
     }
 }
@@ -698,6 +646,7 @@ impl<'a> State<'a> {
         }
     }
 
+    // initialize the camera, doesn't really need to be in the main initialization
     fn new_camera(device: &Device, config: &SurfaceConfiguration, planet_sim: &PlanetSim) 
         -> (Camera, CameraController, CameraUniform, BindGroupLayout, BindGroup, Buffer) 
     {
@@ -715,15 +664,15 @@ impl<'a> State<'a> {
             up: Vector3::unit_y(),
             aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
+            znear: 0.01,
+            zfar: 1000000000.0,
         };
 
-        let camera_controller = CameraController::new(0.03);
+        let camera_controller = CameraController::new(0.003, 0.02);
 
         // create the camera uniform and buffer
         let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera, planet_sim.get_focused().unwrap().get_low_precision_position());
+        camera_uniform.update_view_proj(&camera);
 
         let camera_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -793,9 +742,12 @@ impl<'a> State<'a> {
         self.frame_counter.update();
 
         // update the camera
-        self.camera_controller.update_camera(&mut self.camera);
         self.camera.aspect = self.config.width as f32 / self.config.height as f32;
-        self.camera_uniform.update_view_proj(&self.camera, self.planet_sim.lock().unwrap().get_focused().unwrap().get_low_precision_position());
+        {
+            let ps = self.planet_sim.lock().unwrap();
+            self.camera_controller.update_camera(&mut self.camera, &ps);
+        }
+        self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
 
         // update the planet instances
@@ -826,12 +778,7 @@ impl<'a> State<'a> {
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(
-                                wgpu::Color {
-                                    r: 0.1,
-                                    g: 0.2,
-                                    b: 0.3,
-                                    a: 1.0,
-                                }
+                                wgpu::Color::BLACK,
                             ),
                             store: wgpu::StoreOp::Store,
                         }
@@ -974,30 +921,29 @@ pub async fn run() {
     } 
 
     // test planet sim
-    let mut planet_sim = PlanetSim::new(5.0);
-    planet_sim.add(AstroBody::new(
-        "Test 1",
-        0,
-        100.0, 
-        0.5, 
-        Vector3::new(0.0, 0.0, 0.0),
-        // Vector3::new(0.0, 0.0, 1.0),
-        Vector3::zero(),
-        Quaternion::zero(),
-        Vector3::unit_z(),
-        0.0,
-    ));
-    planet_sim.add(AstroBody::new(
-        "Test 2",
-        1,
-        1.0, 
-        0.5, 
-        Vector3::new(-5.0, 0.0, 0.0),
-        Vector3::new(0.0, 0.0, -10.0),
-        Quaternion::zero(),
-        Vector3::unit_z(),
-        0.0,
-    ));
+    let mut planet_sim = PlanetSim::new(500.0, 10.0);
+    planet_sim.add(AstroBody {
+        label: String::from("Test 1"),
+        texture_index: 0,
+        mass: 1000.0, 
+        radius: 1.0, 
+        position: Vector3::new(0.0, 0.0, 0.0),
+        velocity: Vector3::new(0.0, 0.0, 0.0),
+        rotation: Quaternion::zero(),
+        axis_of_rotation: Vector3::unit_z(),
+        angular_velocity: 0.0,
+    });
+    planet_sim.add(AstroBody {
+        label: String::from("Test 2"),
+        texture_index: 1,
+        mass: 10.0, 
+        radius: 5.0, 
+        position: Vector3::new(-50.0, 0.0, 0.0),
+        velocity: Vector3::new(0.0, 0.0, -100.0),
+        rotation: Quaternion::zero(),
+        axis_of_rotation: Vector3::unit_z(),
+        angular_velocity: 0.0,
+    });
     // planet_sim.add(AstroBody::new(
     //     "Test 3",
     //     1.0, 

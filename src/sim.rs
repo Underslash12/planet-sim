@@ -35,14 +35,15 @@ impl AstroBody {
         }
     } 
 
-    pub fn get_low_precision_position(&self) -> Vector3<f32> {
-        Vector3::new(self.position.x as f32, self.position.y as f32, self.position.z as f32)
+    pub fn get_low_precision_position(&self, scale: f64) -> Vector3<f32> {
+        let scaled_pos = self.position / scale; 
+        Vector3::new(scaled_pos.x as f32, scaled_pos.y as f32, scaled_pos.z as f32)
     }
 
-    fn to_raw_instance(&self) -> AstroBodyInstanceRaw {
-        let low_precision_position = self.get_low_precision_position();
+    fn to_raw_instance(&self, scale: f64) -> AstroBodyInstanceRaw {
+        let low_precision_position = self.get_low_precision_position(scale);
         let translation = cgmath::Matrix4::from_translation(low_precision_position);
-        let scale = cgmath::Matrix4::from_scale(self.radius as f32);
+        let scale = cgmath::Matrix4::from_scale((self.radius / scale) as f32);
         AstroBodyInstanceRaw {
             mat: (translation * scale).into(),
             tex: self.texture_index,
@@ -84,14 +85,17 @@ pub struct PlanetSim {
     pub objects: Vec<AstroBody>,
     focused_index: Option<usize>,  
     gravitational_constant: f64,
+    // scale down distances when rendering so that objects arent *really* far away
+    pub render_scale: f64,
 }
 
 impl PlanetSim {
-    pub fn new(gravitational_constant: f64) -> PlanetSim {
+    pub fn new(gravitational_constant: f64, render_scale: f64) -> PlanetSim {
         PlanetSim {
             objects: Vec::new(),
             focused_index: None,
             gravitational_constant,
+            render_scale,
         }
     }
 
@@ -198,70 +202,70 @@ impl PlanetSim {
 
     // convert the PlanetSim and bodies into a bunch of instances to be rendered
     pub fn instance_data(&self) -> Vec<AstroBodyInstanceRaw> {
-        self.objects.iter().map(AstroBody::to_raw_instance).collect()
+        self.objects.iter().map(|obj| obj.to_raw_instance(self.render_scale)).collect()
     }
 }
 
 
-pub fn test_sim() {
-    use std::thread;
+// pub fn test_sim() {
+//     use std::thread;
 
-    let mut ps = PlanetSim::new(6.67408 / 100_000_000_000.0);
+//     let mut ps = PlanetSim::new(6.67408 / 100_000_000_000.0, 1.0);
     
-    ps.add(AstroBody{
-        label: String::from("Test 1"),
-        texture_index: 0,
-        mass: 100.0,
-        radius: 1.0,
-        position: cgmath::Vector3::new(-1.0, -1.0, 0.0),
-        velocity: cgmath::Vector3::zero(),
-        rotation: cgmath::Quaternion::zero(),
-        axis_of_rotation: cgmath::Vector3::unit_z(),
-        angular_velocity: 0.0,
-    });
+//     ps.add(AstroBody{
+//         label: String::from("Test 1"),
+//         texture_index: 0,
+//         mass: 100.0,
+//         radius: 1.0,
+//         position: cgmath::Vector3::new(-1.0, -1.0, 0.0),
+//         velocity: cgmath::Vector3::zero(),
+//         rotation: cgmath::Quaternion::zero(),
+//         axis_of_rotation: cgmath::Vector3::unit_z(),
+//         angular_velocity: 0.0,
+//     });
 
-    ps.add(AstroBody{
-        label: String::from("Test 2"),
-        texture_index: 1,
-        mass: 100.0,
-        radius: 1.0,
-        position: cgmath::Vector3::new(1.0, 1.0, 0.0),
-        velocity: cgmath::Vector3::zero(),
-        rotation: cgmath::Quaternion::zero(),
-        axis_of_rotation: cgmath::Vector3::unit_z(),
-        angular_velocity: 0.0,
-    });
+//     ps.add(AstroBody{
+//         label: String::from("Test 2"),
+//         texture_index: 1,
+//         mass: 100.0,
+//         radius: 1.0,
+//         position: cgmath::Vector3::new(1.0, 1.0, 0.0),
+//         velocity: cgmath::Vector3::zero(),
+//         rotation: cgmath::Quaternion::zero(),
+//         axis_of_rotation: cgmath::Vector3::unit_z(),
+//         angular_velocity: 0.0,
+//     });
 
-    let timestep = Duration::from_secs_f64(1.0 / 10.0);
-    loop {
-        ps.update(timestep);
+//     let timestep = Duration::from_secs_f64(1.0 / 10.0);
+//     loop {
+//         ps.update(timestep);
 
-        // for i in 0..ps.objects.len() {
-        //     println!("Obj[{}]: {:?}", i, &ps.objects[i].position);
-        // }
-        // println!();
+//         // for i in 0..ps.objects.len() {
+//         //     println!("Obj[{}]: {:?}", i, &ps.objects[i].position);
+//         // }
+//         // println!();
         
-        let mut energy: f64 = 0.0;
-        // compute potential energy
-        for i in 0..ps.objects.len() {
-            for j in 0..ps.objects.len() {
-                if i == j { continue; }
+//         let mut energy: f64 = 0.0;
+//         // compute potential energy
+//         for i in 0..ps.objects.len() {
+//             for j in 0..ps.objects.len() {
+//                 if i == j { continue; }
 
-                let dist = ps.objects[i].position.distance(ps.objects[j].position);
-                let potential = -ps.gravitational_constant * ps.objects[i].mass * ps.objects[j].mass / dist;
+//                 let dist = ps.objects[i].position.distance(ps.objects[j].position);
+//                 let potential = -ps.gravitational_constant * ps.objects[i].mass * ps.objects[j].mass / dist;
 
-                energy += potential;
-            }
-        }
-        // compute kinetic energy
-        for obj in &ps.objects {
-            let speed_sq = obj.velocity.magnitude2();
-            let kinetic = 0.5 * obj.mass * speed_sq;
-            energy += kinetic;
-        }
+//                 energy += potential;
+//             }
+//         }
+//         // compute kinetic energy
+//         for obj in &ps.objects {
+//             let speed_sq = obj.velocity.magnitude2();
+//             let kinetic = 0.5 * obj.mass * speed_sq;
+//             energy += kinetic;
+//         }
 
-        println!("{}", energy);
+//         println!("{}", energy);
 
-        thread::sleep(timestep);
-    }
-}
+//         thread::sleep(timestep);
+//     }
+// }
