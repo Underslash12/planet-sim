@@ -12,5 +12,6 @@
 
 # and 3d files
 *.obj
+*.blend
 /res
 /resources

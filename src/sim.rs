@@ -8,6 +8,7 @@ use wgpu::vertex_attr_array;
 
 pub struct AstroBody {
     pub label: String,
+    pub texture_index: u32,
     pub mass: f64,
     pub radius: f64,
     pub position: cgmath::Vector3<f64>,
@@ -18,11 +19,12 @@ pub struct AstroBody {
 }
 
 impl AstroBody {
-    pub fn new(label: &str, mass: f64, radius: f64, position: cgmath::Vector3<f64>, velocity: cgmath::Vector3<f64>, 
+    pub fn new(label: &str, texture_index: u32, mass: f64, radius: f64, position: cgmath::Vector3<f64>, velocity: cgmath::Vector3<f64>, 
         rotation: cgmath::Quaternion<f32>, axis_of_rotation: cgmath::Vector3<f64>, angular_velocity: f64
     ) -> AstroBody {
         AstroBody {
             label: String::from(label),
+            texture_index,
             mass,
             radius,
             position,
@@ -43,6 +45,7 @@ impl AstroBody {
         let scale = cgmath::Matrix4::from_scale(self.radius as f32);
         AstroBodyInstanceRaw {
             mat: (translation * scale).into(),
+            tex: self.texture_index,
         }
     }
 }
@@ -53,11 +56,12 @@ impl AstroBody {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct AstroBodyInstanceRaw {
     mat: [[f32; 4]; 4],
+    tex: u32,
 }
 
 impl AstroBodyInstanceRaw {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-        vertex_attr_array![5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4];
+    const ATTRIBUTES: [wgpu::VertexAttribute; 5] =
+        vertex_attr_array![5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4, 9 => Uint32];
 
     // get the vertex buffer layout for the AstroBody instance
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -206,6 +210,7 @@ pub fn test_sim() {
     
     ps.add(AstroBody{
         label: String::from("Test 1"),
+        texture_index: 0,
         mass: 100.0,
         radius: 1.0,
         position: cgmath::Vector3::new(-1.0, -1.0, 0.0),
@@ -217,6 +222,7 @@ pub fn test_sim() {
 
     ps.add(AstroBody{
         label: String::from("Test 2"),
+        texture_index: 1,
         mass: 100.0,
         radius: 1.0,
         position: cgmath::Vector3::new(1.0, 1.0, 0.0),

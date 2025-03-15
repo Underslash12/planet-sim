@@ -2,6 +2,7 @@
 
 use std::io::{BufReader, Cursor};
 use cgmath::num_traits::ops::bytes;
+use fs_extra::file;
 use log::error;
 
 use cfg_if::cfg_if;
@@ -86,14 +87,17 @@ pub async fn load_texture_array(
     texture::Texture::from_bytes_array(device, queue, &bytes_array[..], label)
 }
 
-// pub async fn load_mesh(
-//     file_name: &str,
-//     device: &wgpu::Device,
-//     queue: &wgpu::Queue,
-//     layout: &wgpu::BindGroupLayout,
-// ) -> anyhow::Result<model::Mesh> {
-
-// }
+// this will error if the obj file contains reference to materials that don't exists
+pub async fn load_mesh(
+    file_name: &str,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+) -> anyhow::Result<model::Mesh> {
+    let mut model = load_model(file_name, device, queue, layout).await?;
+    let mesh = model.meshes.remove(0);
+    Ok(mesh)
+}
 
 pub async fn load_model(
     file_name: &str,
@@ -120,29 +124,29 @@ pub async fn load_model(
     .await?;
 
     let mut materials = Vec::new();
-    // for m in obj_materials? {
-    //     let diffuse_texture = load_texture(&m.diffuse_texture, device, queue).await?;
-    //     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-    //         layout,
-    //         entries: &[
-    //             wgpu::BindGroupEntry {
-    //                 binding: 0,
-    //                 resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-    //             },
-    //             wgpu::BindGroupEntry {
-    //                 binding: 1,
-    //                 resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-    //             },
-    //         ],
-    //         label: None,
-    //     });
+    for m in obj_materials? {
+        let diffuse_texture = load_texture(&m.diffuse_texture, device, queue).await?;
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                },
+            ],
+            label: None,
+        });
 
-    //     materials.push(model::Material {
-    //         name: m.name,
-    //         diffuse_texture,
-    //         bind_group,
-    //     })
-    // }
+        materials.push(model::Material {
+            name: m.name,
+            diffuse_texture,
+            bind_group,
+        })
+    }
 
     let meshes = models
         .into_iter()
@@ -193,7 +197,6 @@ pub async fn load_model(
                 vertex_buffer,
                 index_buffer,
                 num_elements: m.mesh.indices.len() as u32,
-                // material: m.mesh.material_id.unwrap_or(0),
             }
         })
         .collect::<Vec<_>>();

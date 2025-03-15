@@ -18,11 +18,13 @@ struct InstanceInput {
     @location(6) model_matrix_1: vec4<f32>,
     @location(7) model_matrix_2: vec4<f32>,
     @location(8) model_matrix_3: vec4<f32>,
+    @location(9) tex_index: u32,
 };
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) tex_coords: vec2<f32>,
+    @location(1) tex_index: u32,
 }
 
 @vertex
@@ -39,6 +41,7 @@ fn vs_main(
     );
     var out: VertexOutput;
     out.tex_coords = model.tex_coords;
+    out.tex_index = instance.tex_index;
     out.clip_position = camera.view_proj * model_matrix * vec4<f32>(model.position, 1.0);
     return out;
 }
@@ -60,7 +63,7 @@ var s_array: sampler;
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // return textureSample(t_diffuse, s_diffuse, in.tex_coords);
-    return textureSample(t_array, s_array, in.tex_coords, 1);
+    return textureSample(t_array, s_array, in.tex_coords, in.tex_index);
 }
 
 

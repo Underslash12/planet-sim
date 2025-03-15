@@ -440,7 +440,8 @@ struct State<'a> {
     // vertex_buffer: wgpu::Buffer,
     // num_indices: u32,
     // index_buffer: wgpu::Buffer, 
-    obj_model: model::Model,
+    // obj_model: model::Model,
+    sphere_mesh: model::Mesh,
     diffuse_bind_group: wgpu::BindGroup,
     diffuse_texture: texture::Texture,
     depth_texture: texture::Texture,
@@ -706,12 +707,10 @@ impl<'a> State<'a> {
 
         // depth texture stuff
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
-
-        let obj_model =
-            resources::load_model("cube/cube.obj", &device, &queue, &texture_bind_group_layout)
-                .await
-                .unwrap();
-
+        
+        // load the sphere mesh
+        let sphere_mesh = resources::load_mesh("sphere_mesh.obj", &device, &queue, &texture_bind_group_layout)
+            .await.unwrap();
 
         // the layout for the pipeline, useful for hotswapping pipelines i think
         let render_pipeline_layout =
@@ -820,7 +819,8 @@ impl<'a> State<'a> {
             // vertex_buffer,
             // num_indices,
             // index_buffer,
-            obj_model,
+            // obj_model,
+            sphere_mesh,
             diffuse_bind_group,
             diffuse_texture,
             depth_texture,
@@ -936,8 +936,8 @@ impl<'a> State<'a> {
             // render_pass.draw_indexed(0..self.num_indices, 0, 0..self.planet_sim.lock().unwrap().len() as u32);  
             
             use model::DrawModel;
-            let mesh = &self.obj_model.meshes[0];
-            render_pass.draw_mesh_instanced(mesh, &self.texture_array_material, 0..self.planet_sim.lock().unwrap().len() as u32, &self.camera_bind_group);
+            let instances = self.planet_sim.lock().unwrap().len() as u32;
+            render_pass.draw_mesh_instanced(&self.sphere_mesh, &self.texture_array_material, 0..instances, &self.camera_bind_group);
             // render_pass.draw_mesh_instanced(mesh, material, 0..self.planet_sim.lock().unwrap().len() as u32, &self.camera_bind_group);
 
             // render_pass.draw_model_instanced(
@@ -1037,6 +1037,7 @@ pub async fn run() {
     let mut planet_sim = PlanetSim::new(5.0);
     planet_sim.add(AstroBody::new(
         "Test 1",
+        0,
         100.0, 
         0.5, 
         Vector3::new(0.0, 0.0, 0.0),
@@ -1048,6 +1049,7 @@ pub async fn run() {
     ));
     planet_sim.add(AstroBody::new(
         "Test 2",
+        1,
         1.0, 
         0.5, 
         Vector3::new(-5.0, 0.0, 0.0),
