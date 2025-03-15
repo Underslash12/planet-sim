@@ -5,7 +5,7 @@ struct CameraUniform {
 };
 // here, group(1) refers to bind group 1, which is our camera binding group, 
 // and binding(0) refers to the first (and only) binding within it, which is the camera uniform (within the camera buffer) 
-@group(1) @binding(0)
+@group(0) @binding(0)
 var<uniform> camera: CameraUniform;
 
 struct VertexInput {
@@ -48,16 +48,15 @@ fn vs_main(
 
 
 
-
 // Fragment shader
 
 // @group(0) @binding(0)
 // var t_diffuse: texture_2d<f32>;
 // @group(0) @binding(1)
 // var s_diffuse: sampler;
-@group(2) @binding(2)
+@group(1) @binding(0)
 var t_array: texture_2d_array<f32>;
-@group(2) @binding(3)
+@group(1) @binding(1)
 var s_array: sampler;
 
 @fragment

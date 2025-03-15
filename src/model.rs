@@ -58,6 +58,8 @@ pub struct Mesh {
 }
 
 
+
+
 pub trait DrawModel<'a> {
     fn draw_mesh(&mut self, mesh: &'a Mesh, material: &'a Material, camera_bind_group: &'a wgpu::BindGroup);
     
