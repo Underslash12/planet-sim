@@ -1,6 +1,6 @@
 // sim.rs
 
-use cgmath::{InnerSpace, MetricSpace, Vector3, Zero};
+use cgmath::{InnerSpace, MetricSpace, Quaternion, Vector3, Zero};
 use web_time::{Instant, Duration};
 use winit::dpi::Position;
 use wgpu::vertex_attr_array;
@@ -16,6 +16,22 @@ pub struct AstroBody {
     pub rotation: cgmath::Quaternion<f32>,
     pub axis_of_rotation: cgmath::Vector3<f64>,
     pub angular_velocity: f64, 
+}
+
+impl Default for AstroBody {
+    fn default() -> Self {
+        AstroBody {
+            label: String::from("default_astrobody"),
+            texture_index: 0,
+            mass: 1.0,
+            radius: 1.0,
+            position: Vector3::zero(),
+            velocity: Vector3::zero(),
+            rotation: Quaternion::zero(),
+            axis_of_rotation: Vector3::zero(),
+            angular_velocity: 0.0,
+        }
+    }
 }
 
 impl AstroBody {
@@ -40,7 +56,7 @@ impl AstroBody {
         Vector3::new(scaled_pos.x as f32, scaled_pos.y as f32, scaled_pos.z as f32)
     }
 
-    fn to_raw_instance(&self, scale: f64) -> AstroBodyInstanceRaw {
+    pub fn to_raw_instance(&self, scale: f64) -> AstroBodyInstanceRaw {
         let low_precision_position = self.get_low_precision_position(scale);
         let translation = cgmath::Matrix4::from_translation(low_precision_position);
         let scale = cgmath::Matrix4::from_scale((self.radius / scale) as f32);

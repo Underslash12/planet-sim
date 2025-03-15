@@ -69,6 +69,10 @@ impl Camera {
         OPENGL_TO_WGPU_MATRIX * proj * view
     }
 
+    fn get_high_precision_position(&self) -> Vector3<f64> {
+        Vector3::new(self.pos.x as f64, self.pos.y as f64, self.pos.z as f64)
+    }
+
     fn view(&self) -> Matrix4<f32> {
         let yaw_rot = Matrix4::from_angle_y(Rad(-self.yaw));
         let pitch_rot = Matrix4::from_angle_x(Rad(-self.pitch));
@@ -390,6 +394,8 @@ struct State<'a> {
     sphere_mesh: model::Mesh,
     planet_textures: model::Material,
     planet_instance_buffer: wgpu::Buffer,
+    skysphere_instance: AstroBody,
+    skysphere_instance_buffer: wgpu::Buffer,
     // diffuse_bind_group: wgpu::BindGroup,
     // diffuse_texture: texture::Texture,
     depth_texture: texture::Texture,
@@ -480,7 +486,8 @@ impl<'a> State<'a> {
         // load the planet texture array
         let texture_array = resources::load_texture_array(
             &[
-                "textures/2k_mercury.jpg", 
+                "textures/2k_stars_milky_way.jpg", 
+                "textures/2k_sun.jpg", 
                 "textures/2k_venus_atmosphere.jpg"
             ], 
             &device, &queue, "planet_texture_array"
@@ -535,6 +542,23 @@ impl<'a> State<'a> {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("AstroBody Instance Buffer"),
                 contents: bytemuck::cast_slice(&planet_instance_data),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+
+        // create the instance buffer for the single skybox
+        let skysphere_instance = AstroBody {
+            label: String::from("Skybox"),
+            texture_index: 0,
+            radius: camera.zfar as f64,
+            position: camera.get_high_precision_position(),
+            ..Default::default()
+        };
+        let skysphere_instance_data = vec![skysphere_instance.to_raw_instance(1.0)];
+        let skysphere_instance_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("AstroBody Instance Buffer"),
+                contents: bytemuck::cast_slice(&skysphere_instance_data),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             }
         );
@@ -595,8 +619,8 @@ impl<'a> State<'a> {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                // cull_mode: None,
+                // cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
                 // Requires Features::DEPTH_CLIP_CONTROL
@@ -636,6 +660,8 @@ impl<'a> State<'a> {
             sphere_mesh,
             planet_textures,
             planet_instance_buffer,
+            skysphere_instance,
+            skysphere_instance_buffer,
             // diffuse_bind_group: wgpu::BindGroup,
             // diffuse_texture: texture::Texture,
             depth_texture,
@@ -750,6 +776,10 @@ impl<'a> State<'a> {
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
 
+        // update skysphere position
+        self.skysphere_instance.position = self.camera.get_high_precision_position();
+        self.queue.write_buffer(&self.skysphere_instance_buffer, 0, bytemuck::cast_slice(&vec![self.skysphere_instance.to_raw_instance(1.0)]));
+
         // update the planet instances
         self.planet_sim.lock().unwrap().update(*self.sec_per_sec.lock().unwrap() * self.frame_counter.clamped_delta_time());
         let planet_instance_data = self.planet_sim.lock().unwrap().instance_data();
@@ -796,14 +826,21 @@ impl<'a> State<'a> {
                 occlusion_query_set: None,
             });
 
-            // render pipeline
+            // render pass
             render_pass.set_pipeline(&self.render_pipeline); 
+            
+            // setup sphere mesh vertices and bind groups
             render_pass.set_vertex_buffer(0, self.sphere_mesh.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.sphere_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            render_pass.set_vertex_buffer(1, self.planet_instance_buffer.slice(..));
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             render_pass.set_bind_group(1, &self.planet_textures.bind_group, &[]);
+            
+            // render skysphere
+            render_pass.set_vertex_buffer(1, self.skysphere_instance_buffer.slice(..));
+            render_pass.draw_indexed(0..self.sphere_mesh.num_elements, 0, 0..1);
+            
             // draw the instanced planet meshes
+            render_pass.set_vertex_buffer(1, self.planet_instance_buffer.slice(..));
             let instances = self.planet_sim.lock().unwrap().len() as u32;
             render_pass.draw_indexed(0..self.sphere_mesh.num_elements, 0, 0..instances);
 
@@ -924,9 +961,9 @@ pub async fn run() {
     let mut planet_sim = PlanetSim::new(500.0, 10.0);
     planet_sim.add(AstroBody {
         label: String::from("Test 1"),
-        texture_index: 0,
+        texture_index: 1,
         mass: 1000.0, 
-        radius: 1.0, 
+        radius: 5.0, 
         position: Vector3::new(0.0, 0.0, 0.0),
         velocity: Vector3::new(0.0, 0.0, 0.0),
         rotation: Quaternion::zero(),
@@ -935,9 +972,9 @@ pub async fn run() {
     });
     planet_sim.add(AstroBody {
         label: String::from("Test 2"),
-        texture_index: 1,
+        texture_index: 2,
         mass: 10.0, 
-        radius: 5.0, 
+        radius: 1.0, 
         position: Vector3::new(-50.0, 0.0, 0.0),
         velocity: Vector3::new(0.0, 0.0, -100.0),
         rotation: Quaternion::zero(),
