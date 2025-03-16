@@ -1174,31 +1174,33 @@ pub async fn run() {
     } 
 
     // test planet sim
-    let mut planet_sim = PlanetSim::new(500.0, 10.0);
-    planet_sim.add(AstroBody {
-        label: String::from("Sun"),
-        texture_index: 1,
-        color: [1.0, 1.0, 1.0, 1.0],
-        mass: 1000.0, 
-        radius: 5.0, 
-        position: Vector3::new(0.0, 0.0, 0.0),
-        velocity: Vector3::new(0.0, 0.0, 0.0),
-        rotation: Quaternion::zero(),
-        axis_of_rotation: Vector3::unit_z(),
-        angular_velocity: 0.0,
-    });
-    planet_sim.add(AstroBody {
-        label: String::from("Mars"),
-        texture_index: 6,
-        color: [0.89, 0.471, 0.259, 1.0],
-        mass: 10.0, 
-        radius: 1.0, 
-        position: Vector3::new(-50.0, 0.0, 0.0),
-        velocity: Vector3::new(0.0, 0.0, -100.0),
-        rotation: Quaternion::zero(),
-        axis_of_rotation: Vector3::unit_z(),
-        angular_velocity: 0.0,
-    });
+    let mut planet_sim = PlanetSim::from_real_data();
+    planet_sim.set_focused(Some("Uranus"));
+    // let mut planet_sim = PlanetSim::new(500.0, 10.0);
+    // planet_sim.add(AstroBody {
+    //     label: String::from("Sun"),
+    //     texture_index: 1,
+    //     color: [1.0, 1.0, 1.0, 1.0],
+    //     mass: 1000.0, 
+    //     radius: 5.0, 
+    //     position: Vector3::new(0.0, 0.0, 0.0),
+    //     velocity: Vector3::new(0.0, 0.0, 0.0),
+    //     rotation: Quaternion::zero(),
+    //     axis_of_rotation: Vector3::unit_z(),
+    //     angular_velocity: 0.0,
+    // });
+    // planet_sim.add(AstroBody {
+    //     label: String::from("Mars"),
+    //     texture_index: 6,
+    //     color: [0.89, 0.471, 0.259, 1.0],
+    //     mass: 10.0, 
+    //     radius: 1.0, 
+    //     position: Vector3::new(-50.0, 0.0, 0.0),
+    //     velocity: Vector3::new(0.0, 0.0, -100.0),
+    //     rotation: Quaternion::zero(),
+    //     axis_of_rotation: Vector3::unit_z(),
+    //     angular_velocity: 0.0,
+    // });
     // planet_sim.add(AstroBody::new(
     //     "Test 3",
     //     1.0, 
@@ -1209,7 +1211,6 @@ pub async fn run() {
     //     Vector3::unit_z(),
     //     0.0,
     // ));
-    planet_sim.set_focused(Some("Sun"));
 
     // create the state
     let mut state = State::new(&window, planet_sim).await;

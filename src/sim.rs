@@ -1,11 +1,14 @@
 // sim.rs
 
-use cgmath::{InnerSpace, MetricSpace, Quaternion, Vector3, Zero};
+use cgmath::{InnerSpace, MetricSpace, Quaternion, Vector3, Vector4, Zero};
 use web_time::{Instant, Duration};
 use winit::dpi::Position;
 use wgpu::vertex_attr_array;
+use csv::ReaderBuilder;
+use std::cmp::min;
 
 
+#[derive(Debug)]
 pub struct AstroBody {
     pub label: String,
     pub texture_index: u32,
@@ -106,15 +109,18 @@ pub struct PlanetSim {
     gravitational_constant: f64,
     // scale down distances when rendering so that objects arent *really* far away
     pub render_scale: f64,
+    // this should be a fraction of the shortest orbit (otherwise it will decohere)
+    min_timestep: Duration,
 }
 
 impl PlanetSim {
-    pub fn new(gravitational_constant: f64, render_scale: f64) -> PlanetSim {
+    pub fn new(gravitational_constant: f64, render_scale: f64, min_timestep: Duration) -> PlanetSim {
         PlanetSim {
             objects: Vec::new(),
             focused_index: None,
             gravitational_constant,
             render_scale,
+            min_timestep,
         }
     }
 
@@ -173,50 +179,63 @@ impl PlanetSim {
 
     // the timestep is time between updating in the simulation (which could be anywhere from milliseconds to years), not necessarily time between frames
     pub fn update(&mut self, timestep: Duration) {
-        // update velocity
-        for i in 0..self.objects.len() {
-            // the body we want to update the velocity of
-            let target = &self.objects[i];
-            let mut new_velocity = target.velocity;
-            
-            for j in 0..self.objects.len() {
-                if i == j { continue; }
-                let obj = &self.objects[j];
-
-                // direction of the acceleration vector
-                // this points from target to obj
-                let acc_dir = (obj.position - target.position).normalize();
-                // distance squared between the two astronomical bodies
-                // since collisions aren't simulated, assume that the distance is always at least the two obj's radii apart
-                let mut dist_sq = target.position.distance2(obj.position);
-                let min_dist = target.radius + obj.radius; 
-                if dist_sq < min_dist * min_dist {
-                    dist_sq = min_dist * min_dist;
-                }
-                // acceleration as calculated using the gravitational formula between two bodies
-                let acc = (self.gravitational_constant * obj.mass / dist_sq) * acc_dir;
+        let mut time_remaining = timestep;
+        
+        // this will run timestep / min_timestep times, but will progress the sim by exactly timestep
+        loop {
+            let timestep = min(time_remaining, self.min_timestep);
+    
+            // update velocity
+            for i in 0..self.objects.len() {
+                // the body we want to update the velocity of
+                let target = &self.objects[i];
+                let mut new_velocity = target.velocity;
                 
-                // add this portion of the acceleration to the velocity
-                new_velocity += acc * timestep.as_secs_f64(); 
+                for j in 0..self.objects.len() {
+                    if i == j { continue; }
+                    let obj = &self.objects[j];
+
+                    // direction of the acceleration vector
+                    // this points from target to obj
+                    let acc_dir = (obj.position - target.position).normalize();
+                    // distance squared between the two astronomical bodies
+                    // since collisions aren't simulated, assume that the distance is always at least the two obj's radii apart
+                    let mut dist_sq = target.position.distance2(obj.position);
+                    let min_dist = target.radius + obj.radius; 
+                    if dist_sq < min_dist * min_dist {
+                        dist_sq = min_dist * min_dist;
+                    }
+                    // acceleration as calculated using the gravitational formula between two bodies
+                    let acc = (self.gravitational_constant * obj.mass / dist_sq) * acc_dir;
+                    
+                    // add this portion of the acceleration to the velocity
+                    new_velocity += acc * timestep.as_secs_f64(); 
+                }
+
+                // update the target's velocity to this new velocity after the given timestep
+                let target = &mut self.objects[i];
+                target.velocity = new_velocity;
             }
 
-            // update the target's velocity to this new velocity after the given timestep
-            let target = &mut self.objects[i];
-            target.velocity = new_velocity;
-        }
-
-        // update position
-        for body in &mut self.objects {
-            body.position += body.velocity * timestep.as_secs_f64();
-        }
-        if let Some(obj) = self.get_focused() {
-            let base_pos = obj.position;
+            // update position
             for body in &mut self.objects {
-                body.position -= base_pos;
+                body.position += body.velocity * timestep.as_secs_f64();
+            }
+            if let Some(obj) = self.get_focused() {
+                let base_pos = obj.position;
+                for body in &mut self.objects {
+                    body.position -= base_pos;
+                }
+            }
+
+            // TODO: update rotation 
+
+            if let Some(t) = time_remaining.checked_sub(self.min_timestep) {
+                time_remaining = t;
+            } else {
+                break;
             }
         }
-
-        // TODO: update rotation 
     }
 
     // convert the PlanetSim and bodies into a bunch of instances to be rendered
@@ -225,66 +244,58 @@ impl PlanetSim {
     }
 }
 
+impl PlanetSim {
+    pub fn from_real_data() -> Self {
+        let data = include_str!("../astronomical_body_data.csv");
+        let mut rdr = ReaderBuilder::new()
+            .delimiter(b';')
+            .from_reader(data.as_bytes());
 
-// pub fn test_sim() {
-//     use std::thread;
+        let gravitational_constant = 0.000000000066743;
+        // this is the result of adjusting the gravitational equation for distance in km and mass in 10^24 kg
+        let scaled_gravitational_constant = gravitational_constant * 1_000_000_000_000_000.0;
+        // render scale of 1_000_000 makes Earth on the scale of around ~6 units
+        let render_scale = 1_000_000.0;
+        // this is about 100th the time it should take the moon to orbit Earth, which is probably a good enough update
+        let min_timestep = Duration::from_secs(27 * 24 * 60 * 60) / 100;
+        let mut planet_sim = PlanetSim::new(scaled_gravitational_constant, render_scale, min_timestep);
 
-//     let mut ps = PlanetSim::new(6.67408 / 100_000_000_000.0, 1.0);
-    
-//     ps.add(AstroBody{
-//         label: String::from("Test 1"),
-//         texture_index: 0,
-//         mass: 100.0,
-//         radius: 1.0,
-//         position: cgmath::Vector3::new(-1.0, -1.0, 0.0),
-//         velocity: cgmath::Vector3::zero(),
-//         rotation: cgmath::Quaternion::zero(),
-//         axis_of_rotation: cgmath::Vector3::unit_z(),
-//         angular_velocity: 0.0,
-//     });
+        while let Some(result) = rdr.records().next() {
+            let record = result.expect("Couldn't parse astronomical data csv record");
+            
+            let label = String::from(record.get(0).unwrap());
+            let mass = record.get(1).unwrap().parse::<f64>().unwrap();
+            let radius = record.get(2).unwrap().parse::<f64>().unwrap();
+            let pos_x = record.get(3).unwrap().parse::<f64>().unwrap();
+            let pos_y = record.get(4).unwrap().parse::<f64>().unwrap();
+            let pos_z = record.get(5).unwrap().parse::<f64>().unwrap();
+            let vel_x = record.get(6).unwrap().parse::<f64>().unwrap();
+            let vel_y = record.get(7).unwrap().parse::<f64>().unwrap();
+            let vel_z = record.get(8).unwrap().parse::<f64>().unwrap();
+            let texture_index = record.get(9).unwrap().parse::<u32>().unwrap();
+            let color_r = record.get(10).unwrap().parse::<f32>().unwrap();
+            let color_g = record.get(11).unwrap().parse::<f32>().unwrap();
+            let color_b = record.get(12).unwrap().parse::<f32>().unwrap();
+            let color_a = record.get(13).unwrap().parse::<f32>().unwrap();
 
-//     ps.add(AstroBody{
-//         label: String::from("Test 2"),
-//         texture_index: 1,
-//         mass: 100.0,
-//         radius: 1.0,
-//         position: cgmath::Vector3::new(1.0, 1.0, 0.0),
-//         velocity: cgmath::Vector3::zero(),
-//         rotation: cgmath::Quaternion::zero(),
-//         axis_of_rotation: cgmath::Vector3::unit_z(),
-//         angular_velocity: 0.0,
-//     });
+            let obj = AstroBody {
+                label,
+                texture_index,
+                color: [color_r, color_g, color_b, color_a],
+                mass,
+                radius,
+                position: Vector3::new(pos_x, pos_z, pos_y),
+                velocity: Vector3::new(vel_x, vel_z, vel_y),
+                rotation: Quaternion::zero(),
+                axis_of_rotation: Vector3::unit_y(),
+                angular_velocity: 0.0,
+            };
 
-//     let timestep = Duration::from_secs_f64(1.0 / 10.0);
-//     loop {
-//         ps.update(timestep);
+            // println!("{:?}", obj);
+            planet_sim.add(obj);
+        }
+        planet_sim.set_focused(Some("Sun"));
 
-//         // for i in 0..ps.objects.len() {
-//         //     println!("Obj[{}]: {:?}", i, &ps.objects[i].position);
-//         // }
-//         // println!();
-        
-//         let mut energy: f64 = 0.0;
-//         // compute potential energy
-//         for i in 0..ps.objects.len() {
-//             for j in 0..ps.objects.len() {
-//                 if i == j { continue; }
-
-//                 let dist = ps.objects[i].position.distance(ps.objects[j].position);
-//                 let potential = -ps.gravitational_constant * ps.objects[i].mass * ps.objects[j].mass / dist;
-
-//                 energy += potential;
-//             }
-//         }
-//         // compute kinetic energy
-//         for obj in &ps.objects {
-//             let speed_sq = obj.velocity.magnitude2();
-//             let kinetic = 0.5 * obj.mass * speed_sq;
-//             energy += kinetic;
-//         }
-
-//         println!("{}", energy);
-
-//         thread::sleep(timestep);
-//     }
-// }
+        planet_sim
+    }
+}

@@ -34,7 +34,7 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
             let path = std::path::Path::new(".\\")
                 .join("resources")
                 .join(file_name);
-            println!("{:?}", path);
+            // println!("{:?}", path);
             let txt = std::fs::read_to_string(path)?;
         }
     }
@@ -56,7 +56,7 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
             let path = std::path::Path::new(".\\")
                 .join("resources")
                 .join(file_name);
-            println!("{:?}", path);
+            // println!("{:?}", path);
             let data = std::fs::read(path)?;
         }
     }
