@@ -116,6 +116,7 @@ struct CameraInput {
     turn_left_pressed: bool,
     turn_up_pressed: bool,
     turn_down_pressed: bool,
+    scroll_delta: f32,
 }
 
 impl CameraInput {
@@ -131,6 +132,7 @@ impl CameraInput {
             turn_left_pressed: false,
             turn_up_pressed: false,
             turn_down_pressed: false,
+            scroll_delta: 0.0,
         }
     }
 
@@ -189,6 +191,17 @@ impl CameraInput {
                     }
                     _ => false,
                 }
+            }
+            WindowEvent::MouseWheel { device_id, delta, phase } => {
+                // ignore the pixel delta for now
+                match delta {
+                    MouseScrollDelta::LineDelta(cols, rows) => {
+                        self.scroll_delta += rows;
+                    }
+                    _ => {},
+                }
+                error!("{:?}", delta);
+                true
             }
             // WindowEvent::CursorMoved { device_id, position } => {
             //     println!("{:?}", position);
@@ -254,6 +267,16 @@ impl CameraInput {
         }
         result
     }
+
+    fn peek_scroll_delta(&self) -> f32 {
+        self.scroll_delta
+    }
+
+    fn consume_scroll_delta(&mut self) -> f32 {
+        let scroll_delta = self.scroll_delta;
+        self.scroll_delta = 0.0;
+        scroll_delta
+    }
 }
 
 struct CameraController {
@@ -263,6 +286,10 @@ struct CameraController {
 }
 
 impl CameraController {
+    const MIN_SPEED: f32 = 0.0001;
+    const MAX_SPEED: f32 = 10000.0;
+    const SPEED_MULT: f32 = 1.1;
+
     fn new(translation_speed: f32, rotation_speed: f32) -> CameraController {
         CameraController {
             input: CameraInput::new(),
@@ -276,7 +303,10 @@ impl CameraController {
     }
 
     // update the position of the camera based on inputs and collisions with the planets
-    fn update_camera(&self, camera: &mut Camera, planet_sim: &PlanetSim) {
+    fn update_camera(&mut self, camera: &mut Camera, planet_sim: &PlanetSim) {
+        // update camera speed based on scroll
+        self.translation_speed = (self.translation_speed * Self::SPEED_MULT.powf(self.input.consume_scroll_delta())).clamp(Self::MIN_SPEED, Self::MAX_SPEED);
+
         // update the position
         // have to perform a change of basis to get to camera space
         let translation_vector = self.translation_speed * Vector4::new(
@@ -486,9 +516,17 @@ impl<'a> State<'a> {
         // load the planet texture array
         let texture_array = resources::load_texture_array(
             &[
-                "textures/2k_stars_milky_way.jpg", 
-                "textures/2k_sun.jpg", 
-                "textures/2k_venus_atmosphere.jpg"
+                "textures/2k_stars_milky_way.jpg",
+                "textures/2k_sun.jpg",   
+                "textures/2k_mercury.jpg",  
+                "textures/2k_venus_atmosphere.jpg",
+                "textures/2k_earth_daymap.jpg", 
+                "textures/2k_moon.jpg",
+                "textures/2k_mars.jpg", 
+                "textures/2k_jupiter.jpg", 
+                "textures/2k_saturn.jpg", 
+                "textures/2k_uranus.jpg", 
+                "textures/2k_neptune.jpg", 
             ], 
             &device, &queue, "planet_texture_array"
         ).await.unwrap();
@@ -564,7 +602,7 @@ impl<'a> State<'a> {
         );
         
         // load the sphere mesh
-        let sphere_mesh = resources::load_mesh("sphere_mesh.obj", &device, &queue, &texture_array_bind_group_layout)
+        let sphere_mesh = resources::load_mesh("sphere_mesh_2.obj", &device, &queue, &texture_array_bind_group_layout)
             .await.unwrap();
         // store the texture array in a material
         let planet_textures = model::Material {
@@ -972,7 +1010,7 @@ pub async fn run() {
     });
     planet_sim.add(AstroBody {
         label: String::from("Test 2"),
-        texture_index: 2,
+        texture_index: 4,
         mass: 10.0, 
         radius: 1.0, 
         position: Vector3::new(-50.0, 0.0, 0.0),
