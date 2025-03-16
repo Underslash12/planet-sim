@@ -563,6 +563,7 @@ impl<'a> State<'a> {
                 "textures/2k_saturn.jpg", 
                 "textures/2k_uranus.jpg", 
                 "textures/2k_neptune.jpg", 
+                "textures/2k_pluto.jpg",
             ], 
             &device, &queue, "planet_texture_array"
         ).await.unwrap();
@@ -845,7 +846,7 @@ impl<'a> State<'a> {
             up: Vector3::unit_y(),
             aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
-            znear: 0.01,
+            znear: 0.001,
             zfar: 1000000000.0,
         };
 
@@ -1175,7 +1176,7 @@ pub async fn run() {
 
     // test planet sim
     let mut planet_sim = PlanetSim::from_real_data();
-    planet_sim.set_focused(Some("Uranus"));
+    planet_sim.set_focused(Some("Sun"));
     // let mut planet_sim = PlanetSim::new(500.0, 10.0);
     // planet_sim.add(AstroBody {
     //     label: String::from("Sun"),

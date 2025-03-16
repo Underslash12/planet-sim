@@ -83,6 +83,7 @@ planet_codes = {
     "Saturn": "699",
     "Uranus": "799",
     "Neptune": "899",
+    "Pluto": "999",
 }
 date = "2025-03-01"
 solar_system_barycenter = "'500@0'"
@@ -93,5 +94,5 @@ for planet, code in planet_codes.items():
     for x in pos:
         print(x, end = ";")
     for x in vel:
-        print(x, end = ";;;")
-    print()
+        print(x, end = ";")
+    print(";;;;")
