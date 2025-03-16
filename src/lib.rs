@@ -57,8 +57,7 @@ fn point_vertex_from_astro_body(obj: &AstroBody, render_scale: f64) -> PointVert
     let pos = obj.get_low_precision_position(render_scale);
     PointVertex {
         position: pos.into(),
-        // color: obj.color,
-        color: [0.0, 0.0, 1.0, 1.0],
+        color: obj.color,
     }
 }
 
@@ -339,23 +338,23 @@ impl CameraController {
     }
 
     // update the position of the camera based on inputs and collisions with the planets
-    fn update_camera(&mut self, camera: &mut Camera, planet_sim: &PlanetSim) {
+    fn update_camera(&mut self, camera: &mut Camera, planet_sim: &PlanetSim, delta_time_in_secs: f32) {
         // update camera speed based on scroll
         self.translation_speed = (self.translation_speed * Self::SPEED_MULT.powf(self.input.consume_scroll_delta())).clamp(Self::MIN_SPEED, Self::MAX_SPEED);
 
         // update the position
         // have to perform a change of basis to get to camera space
         let translation_vector = self.translation_speed * Vector4::new(
-            self.input.move_right_input(), 
+            self.input.move_right_input() * delta_time_in_secs, 
             0.0,
-            self.input.move_forward_input(),
+            self.input.move_forward_input() * delta_time_in_secs,
             1.0,
         );
 
         // i personally want the up and down not to depend on camera orientation, but maybe ill make that a toggle
         let yaw = Matrix4::from_angle_y(Rad(camera.yaw));
         camera.pos += (yaw * translation_vector).xyz();
-        camera.pos.y += self.input.move_up_input() * self.translation_speed;
+        camera.pos.y += self.input.move_up_input() * delta_time_in_secs * self.translation_speed;
 
         // handle collisions
         for obj in &planet_sim.objects {
@@ -378,9 +377,9 @@ impl CameraController {
         }
 
         // update the rotation
-        camera.yaw += self.input.turn_right_input() * self.rotation_speed;
+        camera.yaw += self.input.turn_right_input() * delta_time_in_secs * self.rotation_speed;
         camera.yaw %= 2.0 * f32::consts::PI;
-        camera.pitch += self.input.turn_up_input() * self.rotation_speed;
+        camera.pitch += self.input.turn_up_input() * delta_time_in_secs * self.rotation_speed;
         camera.pitch = camera.pitch.clamp(-f32::consts::PI / 2.0, f32::consts::PI / 2.0);
     }
 }
@@ -464,8 +463,6 @@ struct State<'a> {
     skysphere_instance_buffer: wgpu::Buffer,
     point_vertices: Vec<PointVertex>,
     point_vertex_buffer: Buffer,
-    // diffuse_bind_group: wgpu::BindGroup,
-    // diffuse_texture: texture::Texture,
     depth_texture: texture::Texture,
     render_pipelines: Vec<wgpu::RenderPipeline>,
     planet_sim: Arc<Mutex<PlanetSim>>,
@@ -540,6 +537,7 @@ impl<'a> State<'a> {
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::AutoVsync,
+            // present_mode: wgpu::PresentMode::Immediate,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -663,7 +661,6 @@ impl<'a> State<'a> {
 
         // create a depth texture
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
-
 
 
 
@@ -852,7 +849,7 @@ impl<'a> State<'a> {
             zfar: 1000000000.0,
         };
 
-        let camera_controller = CameraController::new(0.003, 0.02);
+        let camera_controller = CameraController::new(1.0, 2.0);
 
         // create the camera uniform and buffer
         let mut camera_uniform = CameraUniform::new();
@@ -924,12 +921,15 @@ impl<'a> State<'a> {
     // update the state
     fn update(&mut self) {
         self.frame_counter.update();
+        // if self.frame_counter.frame % 100 == 0 {
+        //     println!("FPS: {:?}", self.frame_counter.fps());
+        // }
 
         // update the camera
         self.camera.aspect = self.config.width as f32 / self.config.height as f32;
         {
             let ps = self.planet_sim.lock().unwrap();
-            self.camera_controller.update_camera(&mut self.camera, &ps);
+            self.camera_controller.update_camera(&mut self.camera, &ps, self.frame_counter.delta_time().as_secs_f32());
         }
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
@@ -965,9 +965,12 @@ impl<'a> State<'a> {
             label: Some("Render Encoder"),
         });
         
-        // block drops the encoder so that we can call finish on it after
+        // to do the full scene rendering, we use three render passes
+        // first pass renders the skybox (skysphere) since it was conflicting with other things
+        // second pass renders the planet points, which are used to make sure all the planets remain visible in at least one pixel in the sky
+        // third render pass does the rest
         {
-            let mut point_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut skysphere_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[
                     // This is what @location(0) in the fragment shader targets
@@ -978,6 +981,47 @@ impl<'a> State<'a> {
                             load: wgpu::LoadOp::Clear(
                                 wgpu::Color::BLACK,
                             ),
+                            store: wgpu::StoreOp::Store,
+                        }
+                    })
+                ],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            // render pass
+            skysphere_render_pass.set_pipeline(&self.render_pipelines[0]); 
+            
+            // setup sphere mesh vertices and bind groups
+            skysphere_render_pass.set_vertex_buffer(0, self.sphere_mesh.vertex_buffer.slice(..));
+            skysphere_render_pass.set_index_buffer(self.sphere_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            skysphere_render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            skysphere_render_pass.set_bind_group(1, &self.planet_textures.bind_group, &[]);
+            
+            // render skysphere
+            skysphere_render_pass.set_vertex_buffer(1, self.skysphere_instance_buffer.slice(..));
+            skysphere_render_pass.draw_indexed(0..self.sphere_mesh.num_elements, 0, 0..1);
+        }
+
+        // block drops the encoder so that we can call finish on it after
+        {
+            let mut point_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[
+                    // This is what @location(0) in the fragment shader targets
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         }
                     })
@@ -1036,10 +1080,6 @@ impl<'a> State<'a> {
             render_pass.set_index_buffer(self.sphere_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             render_pass.set_bind_group(1, &self.planet_textures.bind_group, &[]);
-            
-            // render skysphere
-            render_pass.set_vertex_buffer(1, self.skysphere_instance_buffer.slice(..));
-            render_pass.draw_indexed(0..self.sphere_mesh.num_elements, 0, 0..1);
             
             // draw the instanced planet meshes
             render_pass.set_vertex_buffer(1, self.planet_instance_buffer.slice(..));
