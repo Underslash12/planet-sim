@@ -9,6 +9,7 @@ use wgpu::vertex_attr_array;
 pub struct AstroBody {
     pub label: String,
     pub texture_index: u32,
+    pub color: [f32; 4],
     pub mass: f64,
     pub radius: f64,
     pub position: cgmath::Vector3<f64>,
@@ -23,6 +24,7 @@ impl Default for AstroBody {
         AstroBody {
             label: String::from("default_astrobody"),
             texture_index: 0,
+            color: [0.0, 0.0, 0.0, 0.0],
             mass: 1.0,
             radius: 1.0,
             position: Vector3::zero(),
@@ -35,12 +37,13 @@ impl Default for AstroBody {
 }
 
 impl AstroBody {
-    pub fn new(label: &str, texture_index: u32, mass: f64, radius: f64, position: cgmath::Vector3<f64>, velocity: cgmath::Vector3<f64>, 
+    pub fn new(label: &str, texture_index: u32, color: [f32; 4], mass: f64, radius: f64, position: cgmath::Vector3<f64>, velocity: cgmath::Vector3<f64>, 
         rotation: cgmath::Quaternion<f32>, axis_of_rotation: cgmath::Vector3<f64>, angular_velocity: f64
     ) -> AstroBody {
         AstroBody {
             label: String::from(label),
             texture_index,
+            color,
             mass,
             radius,
             position,

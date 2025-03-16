@@ -13,7 +13,7 @@ use std::any::type_name;
 use winit::{
     dpi::PhysicalSize, event::*, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
 };
-use wgpu::{Device, SurfaceConfiguration, BindGroupLayout, BindGroup, Buffer, util::DeviceExt};
+use wgpu::{vertex_attr_array, VertexBufferLayout, Device, SurfaceConfiguration, BindGroupLayout, BindGroup, Buffer, VertexStepMode, BufferAddress, util::DeviceExt};
 use cgmath::{perspective, prelude::*, Point3, Rad, Deg, Vector3, Vector4, Matrix4, Quaternion};
 
 #[cfg(target_arch="wasm32")]    
@@ -27,6 +27,40 @@ use model::Vertex;
 mod resources;
 mod sim;
 use sim::{AstroBody, AstroBodyInstanceRaw, PlanetSim};
+
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct PointVertex {
+    pub position: [f32; 3],
+    pub color: [f32; 4],
+}
+
+impl PointVertex {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+        vertex_attr_array![0 => Float32x3, 1 => Float32x4];
+}
+
+impl Vertex for PointVertex {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        use std::mem;
+        VertexBufferLayout {
+            array_stride: mem::size_of::<PointVertex>() as BufferAddress,
+            step_mode: VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBUTES,
+        }
+    }
+}
+
+// get a pointvertex with position and color corresponding to some astronomical body
+fn point_vertex_from_astro_body(obj: &AstroBody, render_scale: f64) -> PointVertex {
+    let pos = obj.get_low_precision_position(render_scale);
+    PointVertex {
+        position: pos.into(),
+        // color: obj.color,
+        color: [0.0, 0.0, 1.0, 1.0],
+    }
+}
 
 
 // now camera stuff
@@ -203,7 +237,6 @@ impl CameraInput {
                         self.scroll_delta += pos.y as f32 / 100.0;
                     }
                 }
-                error!("{:?}", delta);
                 true
             }
             // WindowEvent::CursorMoved { device_id, position } => {
@@ -429,10 +462,12 @@ struct State<'a> {
     planet_instance_buffer: wgpu::Buffer,
     skysphere_instance: AstroBody,
     skysphere_instance_buffer: wgpu::Buffer,
+    point_vertices: Vec<PointVertex>,
+    point_vertex_buffer: Buffer,
     // diffuse_bind_group: wgpu::BindGroup,
     // diffuse_texture: texture::Texture,
     depth_texture: texture::Texture,
-    render_pipeline: wgpu::RenderPipeline,
+    render_pipelines: Vec<wgpu::RenderPipeline>,
     planet_sim: Arc<Mutex<PlanetSim>>,
     frame_counter: FrameCounter,
     sec_per_sec: Arc<Mutex<u32>>,
@@ -603,6 +638,18 @@ impl<'a> State<'a> {
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             }
         );
+
+        // create the point vertices
+        let point_vertices = planet_sim.objects
+            .iter()
+            .map(|obj| point_vertex_from_astro_body(obj, planet_sim.render_scale))
+            .collect::<Vec<PointVertex>>();
+        // create the point vertex buffer
+        let point_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Point Vertex Buffer"),
+            contents: bytemuck::cast_slice(&point_vertices),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
         
         // load the sphere mesh
         let sphere_mesh = resources::load_mesh("sphere_mesh_2.obj", &device, &queue, &texture_array_bind_group_layout)
@@ -619,13 +666,14 @@ impl<'a> State<'a> {
 
 
 
-        // load the vertex and fragment shaders
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));        
+
+        // main shader which renders the planets, skybox, etc
+        let main_shader = device.create_shader_module(wgpu::include_wgsl!("main_shader.wgsl"));        
 
         // the layout for the pipeline, useful for hotswapping pipelines i think
-        let render_pipeline_layout =
+        let main_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
+                label: Some("Main Render Pipeline Layout"),
                 bind_group_layouts: &[
                     &camera_bind_group_layout,
                     &texture_array_bind_group_layout,
@@ -634,11 +682,11 @@ impl<'a> State<'a> {
             });
 
         // create the render pipeline
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
+        let main_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Main Render Pipeline"),
+            layout: Some(&main_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &main_shader,
                 entry_point: Some("vs_main"),
                 buffers: &[
                     model::ModelVertex::desc(),
@@ -647,7 +695,7 @@ impl<'a> State<'a> {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &main_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
@@ -685,6 +733,73 @@ impl<'a> State<'a> {
             cache: None, 
         });
 
+
+
+        // the point shader specifically renders points at the centers of the planets so that they can be seen from far away
+        let point_shader = device.create_shader_module(wgpu::include_wgsl!("point_shader.wgsl"));        
+
+        // the layout for the pipeline, useful for hotswapping pipelines i think
+        let point_render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Point Render Pipeline Layout"),
+                bind_group_layouts: &[
+                    &camera_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
+
+        // create the render pipeline
+        let point_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Point Render Pipeline"),
+            layout: Some(&point_render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &point_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[
+                    PointVertex::desc(),
+                ],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &point_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::PointList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                // cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
+                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+                polygon_mode: wgpu::PolygonMode::Fill,
+                // Requires Features::DEPTH_CLIP_CONTROL
+                unclipped_depth: false,
+                // Requires Features::CONSERVATIVE_RASTERIZATION
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less, // 1.
+                stencil: wgpu::StencilState::default(), // 2.
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            // depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None, 
+        });
+
         // create the state
         State {
             window,
@@ -703,10 +818,12 @@ impl<'a> State<'a> {
             planet_instance_buffer,
             skysphere_instance,
             skysphere_instance_buffer,
+            point_vertices,
+            point_vertex_buffer,
             // diffuse_bind_group: wgpu::BindGroup,
             // diffuse_texture: texture::Texture,
             depth_texture,
-            render_pipeline,
+            render_pipelines: vec![main_render_pipeline, point_render_pipeline],
             planet_sim: Arc::new(Mutex::new(planet_sim)), 
             sec_per_sec: Arc::new(Mutex::new(1)),
             frame_counter: FrameCounter::new(),
@@ -825,6 +942,16 @@ impl<'a> State<'a> {
         self.planet_sim.lock().unwrap().update(*self.sec_per_sec.lock().unwrap() * self.frame_counter.clamped_delta_time());
         let planet_instance_data = self.planet_sim.lock().unwrap().instance_data();
         self.queue.write_buffer(&self.planet_instance_buffer, 0, bytemuck::cast_slice(&planet_instance_data));
+
+        // update point vertex positions
+        {
+            let ps = self.planet_sim.lock().unwrap();
+            self.point_vertices = ps.objects
+                .iter()
+                .map(|obj| point_vertex_from_astro_body(obj, ps.render_scale))
+                .collect::<Vec<PointVertex>>();
+        }
+        self.queue.write_buffer(&self.point_vertex_buffer, 0, bytemuck::cast_slice(&self.point_vertices));
     }
 
     // render whatever needs to be rendered onto the surface
@@ -840,7 +967,7 @@ impl<'a> State<'a> {
         
         // block drops the encoder so that we can call finish on it after
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut point_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[
                     // This is what @location(0) in the fragment shader targets
@@ -863,12 +990,46 @@ impl<'a> State<'a> {
                     }),
                     stencil_ops: None,
                 }),
+                // depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            // point render pass
+            point_render_pass.set_pipeline(&self.render_pipelines[1]); 
+            point_render_pass.set_vertex_buffer(0, self.point_vertex_buffer.slice(..));
+            point_render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            point_render_pass.draw(0..self.point_vertices.len() as u32, 0..1);
+        }
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[
+                    // This is what @location(0) in the fragment shader targets
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }
+                    })
+                ],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
 
             // render pass
-            render_pass.set_pipeline(&self.render_pipeline); 
+            render_pass.set_pipeline(&self.render_pipelines[0]); 
             
             // setup sphere mesh vertices and bind groups
             render_pass.set_vertex_buffer(0, self.sphere_mesh.vertex_buffer.slice(..));
@@ -884,32 +1045,6 @@ impl<'a> State<'a> {
             render_pass.set_vertex_buffer(1, self.planet_instance_buffer.slice(..));
             let instances = self.planet_sim.lock().unwrap().len() as u32;
             render_pass.draw_indexed(0..self.sphere_mesh.num_elements, 0, 0..instances);
-
-
-            // add in a bind group for our texture
-            // render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            // // set the bind group for our camera binding
-            // render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            // // need to actually assign the buffer we created to the renderer (since it needs a specific slot)
-            // render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            // set the instance buffer to be slot 1
-            // render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            // // as with the vertex buffer, we have to set the active index buffer, but this time there is only one slot (hence active)
-            // render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); 
-            // instead of using draw, since we are using an index buffer, we have to use draw_indexed
-            // render_pass.draw_indexed(0..self.num_indices, 0, 0..1);      
-            // render_pass.draw_indexed(0..self.num_indices, 0, 0..self.planet_sim.lock().unwrap().len() as u32);  
-            
-            // use model::DrawModel;
-            // let instances = self.planet_sim.lock().unwrap().len() as u32;
-            // render_pass.draw_mesh_instanced(&self.sphere_mesh, &self.texture_array_material, 0..instances, &self.camera_bind_group);
-            // render_pass.draw_mesh_instanced(mesh, material, 0..self.planet_sim.lock().unwrap().len() as u32, &self.camera_bind_group);
-
-            // render_pass.draw_model_instanced(
-            //     &self.obj_model,
-            //     0..self.planet_sim.lock().unwrap().len() as u32,
-            //     &self.camera_bind_group,
-            // );
         }
         
         // submit will accept anything that implements IntoIter
@@ -1001,8 +1136,9 @@ pub async fn run() {
     // test planet sim
     let mut planet_sim = PlanetSim::new(500.0, 10.0);
     planet_sim.add(AstroBody {
-        label: String::from("Test 1"),
+        label: String::from("Sun"),
         texture_index: 1,
+        color: [1.0, 1.0, 1.0, 1.0],
         mass: 1000.0, 
         radius: 5.0, 
         position: Vector3::new(0.0, 0.0, 0.0),
@@ -1012,8 +1148,9 @@ pub async fn run() {
         angular_velocity: 0.0,
     });
     planet_sim.add(AstroBody {
-        label: String::from("Test 2"),
-        texture_index: 4,
+        label: String::from("Mars"),
+        texture_index: 6,
+        color: [0.89, 0.471, 0.259, 1.0],
         mass: 10.0, 
         radius: 1.0, 
         position: Vector3::new(-50.0, 0.0, 0.0),
@@ -1032,7 +1169,7 @@ pub async fn run() {
     //     Vector3::unit_z(),
     //     0.0,
     // ));
-    planet_sim.set_focused(Some("Test 1"));
+    planet_sim.set_focused(Some("Sun"));
 
     // create the state
     let mut state = State::new(&window, planet_sim).await;
