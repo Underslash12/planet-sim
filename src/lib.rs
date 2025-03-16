@@ -2,6 +2,7 @@
 
 use env_logger::init;
 use log::{error, info};
+use winit::dpi::PhysicalPosition;
 use core::f32;
 use std::{collections::VecDeque, f32::consts::PI};
 use web_time::{Duration, Instant};
@@ -198,7 +199,9 @@ impl CameraInput {
                     MouseScrollDelta::LineDelta(cols, rows) => {
                         self.scroll_delta += rows;
                     }
-                    _ => {},
+                    MouseScrollDelta::PixelDelta(pos) => {
+                        self.scroll_delta += pos.y as f32 / 100.0;
+                    }
                 }
                 error!("{:?}", delta);
                 true
