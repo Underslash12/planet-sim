@@ -908,6 +908,7 @@ impl<'a> State<'a> {
 
             self.config.width = new_size.width;
             self.config.height = new_size.height;
+            self.camera.aspect = self.config.width as f32 / self.config.height as f32;
             self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
 
             self.surface.configure(&self.device, &self.config);
@@ -927,7 +928,6 @@ impl<'a> State<'a> {
         // }
 
         // update the camera
-        self.camera.aspect = self.config.width as f32 / self.config.height as f32;
         {
             let ps = self.planet_sim.lock().unwrap();
             self.camera_controller.update_camera(&mut self.camera, &ps, self.frame_counter.delta_time().as_secs_f32());
