@@ -161,7 +161,15 @@ impl PlanetSim {
             None => None,
         }
     }
-    
+
+    pub fn get_mut_focused(&mut self) -> Option<&mut AstroBody> {
+        match self.focused_index {
+            // this branch should never return None, want to panic if that is the case as it indicates some error occurred
+            Some(index) => Some(self.objects.get_mut(index).expect(&format!("Focused object index {} was invalid", index))),
+            None => None,
+        }
+    }
+
     pub fn set_focused(&mut self, label: Option<&str>) {
         match label {
             Some(new_label) => {

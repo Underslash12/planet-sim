@@ -7,6 +7,7 @@ use core::f32;
 use std::{collections::VecDeque, f32::consts::PI};
 use web_time::{Duration, Instant};
 use std::thread;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::any::type_name;
 
@@ -1222,6 +1223,80 @@ fn fill_in_planet_fields(obj: &AstroBody) {
 }
 
 
+// convenience function to get the value from the change event and process it
+#[cfg(target_arch = "wasm32")]
+fn register_input_onchange<F: Fn(V) + 'static, V: FromStr>(document: &Document, id: &str, func: F) {
+    let input_element = get_html_element_by_id::<HtmlInputElement>(document, id);
+    let input_change = move |event: web_sys::Event| {
+        let target = event.target().unwrap();
+        let slider_element = target.dyn_into::<HtmlInputElement>().unwrap();
+        let value = slider_element.value();
+
+        if let Ok(val) = value.parse::<V>() {
+            func(val);
+        }
+    };
+    register_js_callback_with_event(&input_element, HtmlElement::set_onchange, input_change);
+}
+
+
+// binds the onchange functions to change the appropriate focused planet value
+#[cfg(target_arch = "wasm32")]
+fn register_focused_planet_input_onchange(document: &Document, state: &State) {
+    // name
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-name", move |val: String| { 
+        set_focused_planet_input(&val);
+        planet_sim.lock().unwrap().get_mut_focused().unwrap().label = val; 
+    });
+    
+    // mass
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-mass", move |val: f64| { if val > 0.0 { planet_sim.lock().unwrap().get_mut_focused().unwrap().mass = val; }});
+
+    // radius
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-radius", move |val: f64| { if val > 0.0 { planet_sim.lock().unwrap().get_mut_focused().unwrap().radius = val; }});
+
+    // position x
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-pos-x", move |val: f64| { planet_sim.lock().unwrap().get_mut_focused().unwrap().position.x = val; });
+    // position y
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-pos-y", move |val: f64| { planet_sim.lock().unwrap().get_mut_focused().unwrap().position.y = val; });
+    // position z
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-pos-z", move |val: f64| { planet_sim.lock().unwrap().get_mut_focused().unwrap().position.z = val; });
+
+    // velocity x
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-vel-x", move |val: f64| { planet_sim.lock().unwrap().get_mut_focused().unwrap().velocity.x = val; });
+    // velocity y
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-vel-y", move |val: f64| { planet_sim.lock().unwrap().get_mut_focused().unwrap().velocity.y = val; });
+    // velocity z
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-vel-z", move |val: f64| { planet_sim.lock().unwrap().get_mut_focused().unwrap().velocity.z = val; });
+
+    // color r
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-color-r", move |val: f32| { if val >= 0.0 && val <= 1.0 { planet_sim.lock().unwrap().get_mut_focused().unwrap().color[0] = val; }});
+    // color g
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-color-g", move |val: f32| { if val >= 0.0 && val <= 1.0 { planet_sim.lock().unwrap().get_mut_focused().unwrap().color[1] = val; }});
+    // color b
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-color-b", move |val: f32| { if val >= 0.0 && val <= 1.0 { planet_sim.lock().unwrap().get_mut_focused().unwrap().color[2] = val; }});
+    // color a
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-color-a", move |val: f32| { if val >= 0.0 && val <= 1.0 { planet_sim.lock().unwrap().get_mut_focused().unwrap().color[3] = val; }});
+
+    // texture index
+    let planet_sim = state.planet_sim.clone();
+    register_input_onchange(&document, "planet-texture-index", move |val: u32| { planet_sim.lock().unwrap().get_mut_focused().unwrap().texture_index = val; });
+}
+
+
 #[cfg_attr(target_arch="wasm32", wasm_bindgen(start))]
 pub async fn run() {
     // log logs and panics in the js console if targeting wasm
@@ -1275,43 +1350,6 @@ pub async fn run() {
         fill_in_planet_fields(&planet_sim.get_focused().unwrap());
     }
 
-
-    // let mut planet_sim = PlanetSim::new(500.0, 10.0);
-    // planet_sim.add(AstroBody {
-    //     label: String::from("Sun"),
-    //     texture_index: 1,
-    //     color: [1.0, 1.0, 1.0, 1.0],
-    //     mass: 1000.0, 
-    //     radius: 5.0, 
-    //     position: Vector3::new(0.0, 0.0, 0.0),
-    //     velocity: Vector3::new(0.0, 0.0, 0.0),
-    //     rotation: Quaternion::zero(),
-    //     axis_of_rotation: Vector3::unit_z(),
-    //     angular_velocity: 0.0,
-    // });
-    // planet_sim.add(AstroBody {
-    //     label: String::from("Mars"),
-    //     texture_index: 6,
-    //     color: [0.89, 0.471, 0.259, 1.0],
-    //     mass: 10.0, 
-    //     radius: 1.0, 
-    //     position: Vector3::new(-50.0, 0.0, 0.0),
-    //     velocity: Vector3::new(0.0, 0.0, -100.0),
-    //     rotation: Quaternion::zero(),
-    //     axis_of_rotation: Vector3::unit_z(),
-    //     angular_velocity: 0.0,
-    // });
-    // planet_sim.add(AstroBody::new(
-    //     "Test 3",
-    //     1.0, 
-    //     0.5, 
-    //     Vector3::new(-1.0, 0.5, 0.5),
-    //     Vector3::new(0.0, 0.0, -1.0),
-    //     Quaternion::zero(),
-    //     Vector3::unit_z(),
-    //     0.0,
-    // ));
-
     // create the state
     let mut state = State::new(&window, planet_sim).await;
     let mut surface_configured = false;
@@ -1321,30 +1359,6 @@ pub async fn run() {
     {
         // get the html document
         let document = get_web_document();
-
-        // // test button
-        // let button = get_html_element_by_id::<HtmlButtonElement>(&document, "test-button");
-        // let planet_sim = state.planet_sim.clone();
-        // let button_onclick = move || {
-        //     error!("Button Clicked!! {:?}", &planet_sim.lock().unwrap().get_focused().unwrap().label);
-        // };
-        // register_js_callback(&button, HtmlElement::set_onclick, button_onclick);
-
-        // // timescale adjuster
-        // let timescale_input = get_html_element_by_id::<HtmlInputElement>(&document, "dt-input");
-        // let sec_per_sec = state.sec_per_sec.clone();
-        // let timescale_onchange = move |event: web_sys::Event| {
-        //     let target = event.target().unwrap();
-        //     let input_element = target.dyn_into::<HtmlInputElement>().unwrap();
-        //     let value = input_element.value();
-        //     if let Ok(dt) = value.parse::<u32>() {
-        //         *sec_per_sec.lock().unwrap() = dt;
-        //         error!("New timescale: {}sec/sec", dt);
-        //     } else {
-        //         error!("{} is not a valid timescale", value);
-        //     }
-        // };
-        // register_js_callback_with_event(&timescale_input, HtmlElement::set_onchange, timescale_onchange);
 
         // add the timescale slider callback
         let timescale_slider = get_html_element_by_id::<HtmlInputElement>(&document, "timescale-slider");
@@ -1420,6 +1434,9 @@ pub async fn run() {
             fill_in_planet_fields(&ps.get_focused().unwrap());
         };
         register_js_callback(&select_right, HtmlElement::set_onclick, select_right_onclick);
+
+        // register all the callbacks for editing the input fields
+        register_focused_planet_input_onchange(&document, &state);
     } 
 
     event_loop.run(move |event, control_flow| {
@@ -1456,6 +1473,7 @@ pub async fn run() {
                             state.update();
 
                             // want to update the fields every frame
+                            #[cfg(target_arch = "wasm32")]
                             fill_in_planet_fields(&state.planet_sim.lock().unwrap().get_focused().unwrap());
 
                             match state.render() {
