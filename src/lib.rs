@@ -850,7 +850,7 @@ impl<'a> State<'a> {
             zfar: 1000000000.0,
         };
 
-        let camera_controller = CameraController::new(1.0, 2.0);
+        let camera_controller = CameraController::new(0.05, 2.0);
 
         // create the camera uniform and buffer
         let mut camera_uniform = CameraUniform::new();
@@ -1168,48 +1168,57 @@ fn set_focused_planet_input(focused_planet: &str) {
 }
 
 
-// fill in the "selected planet" field option on the webpage, not it doesn't actually have to be the selected planet
+// fill in the "selected planet" field option on the webpage, note it doesn't actually have to be the selected planet
+// if any of the inputs are selected, it ignores them
 #[cfg(target_arch = "wasm32")]
 fn fill_in_planet_fields(obj: &AstroBody) {
     let document = get_web_document();
+    let active_element = document.active_element();
+    let id = {
+        if let Some(element) = active_element {
+            &element.id()
+        } else {
+            ""
+        }
+    };
 
     // set the name, mass, and radius fields
     let name_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-name");
-    name_element.set_value(&obj.label);
+    if name_element.id() != id { name_element.set_value(&obj.label); }
     let mass_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-mass");
-    mass_element.set_value(&format!("{}", obj.mass));
+    if mass_element.id() != id { mass_element.set_value(&format!("{}", obj.mass)); }
     let radius_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-radius");
-    radius_element.set_value(&format!("{}", obj.radius));
+    if radius_element.id() != id { radius_element.set_value(&format!("{}", obj.radius)); }
 
     // set the position fields
     let pos_x_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-pos-x");
-    pos_x_element.set_value(&format!("{}", obj.position.x));
+    if pos_x_element.id() != id { pos_x_element.set_value(&format!("{}", obj.position.x)); }
     let pos_y_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-pos-y");
-    pos_y_element.set_value(&format!("{}", obj.position.y));
+    if pos_y_element.id() != id { pos_y_element.set_value(&format!("{}", obj.position.y)); }
     let pos_z_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-pos-z");
-    pos_z_element.set_value(&format!("{}", obj.position.z));
+    if pos_z_element.id() != id { pos_z_element.set_value(&format!("{}", obj.position.z)); }
 
     // set the velocity fields
     let vel_x_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-vel-x");
-    vel_x_element.set_value(&format!("{:.3}", obj.velocity.x));
+    if vel_x_element.id() != id { vel_x_element.set_value(&format!("{:.3}", obj.velocity.x)); }
     let vel_y_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-vel-y");
-    vel_y_element.set_value(&format!("{:.3}", obj.velocity.y));
+    if vel_y_element.id() != id { vel_y_element.set_value(&format!("{:.3}", obj.velocity.y)); }
     let vel_z_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-vel-z");
-    vel_z_element.set_value(&format!("{:.3}", obj.velocity.z));
+    if vel_z_element.id() != id { vel_z_element.set_value(&format!("{:.3}", obj.velocity.z)); }
 
     // set the color fields
     let color_r_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-color-r");
-    color_r_element.set_value(&format!("{:.3}", obj.color[0]));
+    if color_r_element.id() != id { color_r_element.set_value(&format!("{:.3}", obj.color[0])); }
     let color_g_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-color-g");
-    color_g_element.set_value(&format!("{:.3}", obj.color[1]));
+    if color_g_element.id() != id { color_g_element.set_value(&format!("{:.3}", obj.color[1])); }
     let color_b_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-color-b");
-    color_b_element.set_value(&format!("{:.3}", obj.color[2]));
+    if color_b_element.id() != id { color_b_element.set_value(&format!("{:.3}", obj.color[2])); }
     let color_a_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-color-a");
-    color_a_element.set_value(&format!("{:.3}", obj.color[3]));
+    if color_a_element.id() != id { color_a_element.set_value(&format!("{:.3}", obj.color[3])); }
 
     // texture index
     let texture_index_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-texture-index");
-    texture_index_element.set_value(&format!("{}", obj.texture_index));
+    if texture_index_element.id() != id { texture_index_element.set_value(&format!("{}", obj.texture_index)); }
 }
 
 
@@ -1258,7 +1267,7 @@ pub async fn run() {
 
     // create the realistic planet sim focused on the sun
     let mut planet_sim = PlanetSim::from_real_data();
-    planet_sim.set_focused(Some("Pluto"));
+    planet_sim.set_focused(Some("Earth"));
     #[cfg(target_arch = "wasm32")]
     {
         // fill out information fields
@@ -1361,6 +1370,56 @@ pub async fn run() {
             timescale_display.set_inner_text(&formatted_secs(*sec_per_sec.lock().unwrap()));
         };
         register_js_callback_with_event(&timescale_slider, HtmlElement::set_oninput, timescale_onchange);
+
+        // add the focus selector button functionality 
+        let select_left = get_html_element_by_id::<HtmlButtonElement>(&document, "focus-selector-left");
+        let planet_sim = state.planet_sim.clone();
+        let select_left_onclick = move || {
+            let mut ps = planet_sim.lock().unwrap();
+            let focused = ps.get_focused().unwrap();
+            let object_count = ps.objects.len();
+
+            let mut focused_index = 0;
+            for i in 0..object_count {
+                if ps.objects[i].label == focused.label {
+                    focused_index = i; 
+                    break;
+                }
+            }
+
+            // update the inputs to reflect the change in focus
+            let prev_focused_index = (focused_index + object_count - 1) % object_count; 
+            let new_label = ps.objects[prev_focused_index].label.clone();
+            ps.set_focused(Some(&new_label));
+            set_focused_planet_input(&new_label);
+            fill_in_planet_fields(&ps.get_focused().unwrap());
+        };
+        register_js_callback(&select_left, HtmlElement::set_onclick, select_left_onclick);
+
+        // add the right focus selector button functionality 
+        let select_right = get_html_element_by_id::<HtmlButtonElement>(&document, "focus-selector-right");
+        let planet_sim = state.planet_sim.clone();
+        let select_right_onclick = move || {
+            let mut ps = planet_sim.lock().unwrap();
+            let focused = ps.get_focused().unwrap();
+            let object_count = ps.objects.len();
+
+            let mut focused_index = 0;
+            for i in 0..object_count {
+                if ps.objects[i].label == focused.label {
+                    focused_index = i; 
+                    break;
+                }
+            }
+
+            // update the inputs to reflect the change in focus
+            let next_focused_index = (focused_index + object_count + 1) % object_count; 
+            let new_label = ps.objects[next_focused_index].label.clone();
+            ps.set_focused(Some(&new_label));
+            set_focused_planet_input(&new_label);
+            fill_in_planet_fields(&ps.get_focused().unwrap());
+        };
+        register_js_callback(&select_right, HtmlElement::set_onclick, select_right_onclick);
     } 
 
     event_loop.run(move |event, control_flow| {
@@ -1388,13 +1447,17 @@ pub async fn run() {
                         WindowEvent::RedrawRequested => {
                             // This tells winit that we want another frame after this one
                             state.window().request_redraw();
-
-                            // just kidding, do need to check if the surface is configured
+                            // need to check if the surface is configured
                             if !surface_configured {
                                 return;
                             }
-                
+                            
+                            // update the state of the sim
                             state.update();
+
+                            // want to update the fields every frame
+                            fill_in_planet_fields(&state.planet_sim.lock().unwrap().get_focused().unwrap());
+
                             match state.render() {
                                 Ok(_) => {},
                                 // Reconfigure the surface if it's lost or outdated

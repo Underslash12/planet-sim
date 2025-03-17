@@ -161,7 +161,7 @@ impl PlanetSim {
             None => None,
         }
     }
-
+    
     pub fn set_focused(&mut self, label: Option<&str>) {
         match label {
             Some(new_label) => {
