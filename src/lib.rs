@@ -652,7 +652,7 @@ impl<'a> State<'a> {
         });
         
         // load the sphere mesh
-        let sphere_mesh = resources::load_mesh("sphere_mesh_2.obj", &device, &queue, &texture_array_bind_group_layout)
+        let sphere_mesh = resources::load_mesh("models/sphere_mesh_high_quality.obj", &device, &queue, &texture_array_bind_group_layout)
             .await.unwrap();
         // store the texture array in a material
         let planet_textures = model::Material {
