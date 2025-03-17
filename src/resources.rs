@@ -17,7 +17,7 @@ fn format_url(file_name: &str) -> reqwest::Url {
     let location = window.location();
     let mut origin = location.origin().unwrap();
     // error!("Location: {:?}, File_name: {:?}", origin, file_name);
-    let base = reqwest::Url::parse(&format!("{}/resources/", origin,)).unwrap();
+    let base = reqwest::Url::parse(&format!("{}/assets/", origin,)).unwrap();
     base.join(file_name).unwrap()
 }
 
@@ -32,7 +32,7 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
         } else {
             // let path = std::path::Path::new(env!("OUT_DIR"))
             let path = std::path::Path::new(".\\")
-                .join("resources")
+                .join("assets")
                 .join(file_name);
             // println!("{:?}", path);
             let txt = std::fs::read_to_string(path)?;
@@ -54,7 +54,7 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
         } else {
             // let path = std::path::Path::new(env!("OUT_DIR"))
             let path = std::path::Path::new(".\\")
-                .join("resources")
+                .join("assets")
                 .join(file_name);
             // println!("{:?}", path);
             let data = std::fs::read(path)?;
