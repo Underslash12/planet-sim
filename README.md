@@ -12,7 +12,6 @@ fast backend: Even with the naive implementation, the rust / wasm backend allows
 
 accurate values: As mentioned above, the planetary data position and velocity data was taken from JPL's Horizons API, so the starting point of the simulation is very accurate, and it seems like it stays accurate for a while. If you want to add in other real-life objects, the start date of the simulation is currently March 1st, 2025, with data taken from the vectors ephemeris database. Also, the y and z coordinates are swapped.  
 
-
 ## Controls
 
 W - move forward\
@@ -21,8 +20,12 @@ A - move left\
 D - move right\
 Space - move up\
 Shift - move down\
-Scroll up - increase move speed\
-Scroll down - decrease move speed
+Left Arrow - turn left\
+Right Arrow - turn right\
+Up Arrow - turn up\
+Down Arrow - turn down\
+Scroll up - increase movement speed\
+Scroll down - decrease movement speed
 
 The side panel has a slider to change the time scale, and it can run up to 31 years of simulation time per second of real time (though it may not be able to run that fast due to performance limitations). It also has input fields for the planet stats, but due to how I implemented the internals, the position is displayed as relative to the target body (which is itself) so its position is <0, 0, 0>. However, you can still add relative position to it, which does work, though visually they will be overwritten when saving the value. Changing the radius of the planet is purely visual, only mass affects the actual simulation. 
 
