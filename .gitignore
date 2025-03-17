@@ -6,7 +6,6 @@
 *.png
 *.jpg
 /images
-/assets
 
 # also ignore text files
 *.txt
