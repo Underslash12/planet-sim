@@ -19,7 +19,7 @@ use cgmath::{perspective, prelude::*, Point3, Rad, Deg, Vector3, Vector4, Matrix
 #[cfg(target_arch="wasm32")]    
 use wasm_bindgen::{prelude::*, JsCast, closure};
 #[cfg(target_arch="wasm32")]
-use web_sys::{HtmlButtonElement, HtmlInputElement, HtmlElement, Document};
+use web_sys::{HtmlButtonElement, HtmlInputElement, HtmlElement, Document, HtmlLabelElement};
 
 mod texture;
 mod model;
@@ -823,7 +823,7 @@ impl<'a> State<'a> {
             depth_texture,
             render_pipelines: vec![main_render_pipeline, point_render_pipeline],
             planet_sim: Arc::new(Mutex::new(planet_sim)), 
-            sec_per_sec: Arc::new(Mutex::new(1)),
+            sec_per_sec: Arc::new(Mutex::new(0)),
             frame_counter: FrameCounter::new(),
         }
     }
@@ -1097,6 +1097,13 @@ impl<'a> State<'a> {
 }
 
 
+// get the document of the web page
+#[cfg(target_arch = "wasm32")]
+fn get_web_document() -> Document {
+    web_sys::window().expect("Unable to get window").document().expect("Unable to get document")
+}
+
+
 // get a generic html element by id using web_sys
 #[cfg(target_arch = "wasm32")]
 fn get_html_element_by_id<T: JsCast + Clone>(doc: &Document, id: &str) -> T {
@@ -1132,6 +1139,80 @@ fn register_js_callback_with_event<'a, E, F, C>(element: &'a E, event_function: 
 }
 
 
+// return a string formatting secs into something like 2.5 years/sec
+fn formatted_secs(secs: u32) -> String {
+    let (val, unit) = {
+        if secs >= 31536000 {
+            (secs as f64 / 31536000 as f64, "years")
+        } else if secs >= 86400 {
+            (secs as f64 / 86400 as f64, "days")
+        } else if secs >= 3600 {
+            (secs as f64 / 3600 as f64, "hours")
+        } else if secs >= 60 {
+            (secs as f64 / 60 as f64, "mins")
+        } else {
+            // early return on this one since this returns integers
+            return format!("{} {}/sec", secs, "secs");
+        }
+    };
+    format!("{:.2} {}/sec", val, unit)
+}
+
+
+// set the focus selector field, probably only used on page load
+#[cfg(target_arch = "wasm32")]
+fn set_focused_planet_input(focused_planet: &str) {
+    let document = get_web_document();
+    let focus_element = get_html_element_by_id::<HtmlInputElement>(&document, "focus-selector");
+    focus_element.set_value(focused_planet);
+}
+
+
+// fill in the "selected planet" field option on the webpage, not it doesn't actually have to be the selected planet
+#[cfg(target_arch = "wasm32")]
+fn fill_in_planet_fields(obj: &AstroBody) {
+    let document = get_web_document();
+
+    // set the name, mass, and radius fields
+    let name_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-name");
+    name_element.set_value(&obj.label);
+    let mass_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-mass");
+    mass_element.set_value(&format!("{}", obj.mass));
+    let radius_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-radius");
+    radius_element.set_value(&format!("{}", obj.radius));
+
+    // set the position fields
+    let pos_x_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-pos-x");
+    pos_x_element.set_value(&format!("{}", obj.position.x));
+    let pos_y_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-pos-y");
+    pos_y_element.set_value(&format!("{}", obj.position.y));
+    let pos_z_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-pos-z");
+    pos_z_element.set_value(&format!("{}", obj.position.z));
+
+    // set the velocity fields
+    let vel_x_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-vel-x");
+    vel_x_element.set_value(&format!("{:.3}", obj.velocity.x));
+    let vel_y_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-vel-y");
+    vel_y_element.set_value(&format!("{:.3}", obj.velocity.y));
+    let vel_z_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-vel-z");
+    vel_z_element.set_value(&format!("{:.3}", obj.velocity.z));
+
+    // set the color fields
+    let color_r_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-color-r");
+    color_r_element.set_value(&format!("{:.3}", obj.color[0]));
+    let color_g_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-color-g");
+    color_g_element.set_value(&format!("{:.3}", obj.color[1]));
+    let color_b_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-color-b");
+    color_b_element.set_value(&format!("{:.3}", obj.color[2]));
+    let color_a_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-color-a");
+    color_a_element.set_value(&format!("{:.3}", obj.color[3]));
+
+    // texture index
+    let texture_index_element = get_html_element_by_id::<HtmlInputElement>(&document, "planet-texture-index");
+    texture_index_element.set_value(&format!("{}", obj.texture_index));
+}
+
+
 #[cfg_attr(target_arch="wasm32", wasm_bindgen(start))]
 pub async fn run() {
     // log logs and panics in the js console if targeting wasm
@@ -1164,19 +1245,28 @@ pub async fn run() {
         use web_sys::{Element, HtmlButtonElement, Node};
 
         // get the html document
-        let document = web_sys::window().expect("Unable to get window").document().expect("Unable to get document");
+        let document = get_web_document();
         
         // construct the canvas from the winit window
-        let body = document.get_element_by_id("planet-sim").expect("Unable to get document body");
+        let canvas_container = document.get_element_by_id("planet-sim").expect("Unable to get canvas_container");
         let canvas = Element::from(window.canvas().expect("Unable to create winit canvas"));
-        // want the canvas to be on the left (in front of the )
-        let first_child = body.child_nodes().item(0).expect("Couldn't get child 0 of body");
-        body.insert_before(&canvas, Some(&first_child)).expect("Failed to insert canvas into document body");
+        canvas_container.append_child(&canvas).expect("Failed to append canvas to canvas_container");
+
+        // let first_child = body.child_nodes().item(0).expect("Couldn't get child 0 of body");
+        // body.insert_before(&canvas, Some(&first_child)).expect("Failed to insert canvas into document body");
     } 
 
-    // test planet sim
+    // create the realistic planet sim focused on the sun
     let mut planet_sim = PlanetSim::from_real_data();
-    planet_sim.set_focused(Some("Sun"));
+    planet_sim.set_focused(Some("Pluto"));
+    #[cfg(target_arch = "wasm32")]
+    {
+        // fill out information fields
+        set_focused_planet_input(&planet_sim.get_focused().unwrap().label);
+        fill_in_planet_fields(&planet_sim.get_focused().unwrap());
+    }
+
+
     // let mut planet_sim = PlanetSim::new(500.0, 10.0);
     // planet_sim.add(AstroBody {
     //     label: String::from("Sun"),
@@ -1221,31 +1311,56 @@ pub async fn run() {
     #[cfg(target_arch = "wasm32")]
     {
         // get the html document
-        let document = web_sys::window().expect("Unable to get window").document().expect("Unable to get document");
+        let document = get_web_document();
 
-        // test button
-        let button = get_html_element_by_id::<HtmlButtonElement>(&document, "test-button");
-        let planet_sim = state.planet_sim.clone();
-        let button_onclick = move || {
-            error!("Button Clicked!! {:?}", &planet_sim.lock().unwrap().get_focused().unwrap().label);
-        };
-        register_js_callback(&button, HtmlElement::set_onclick, button_onclick);
+        // // test button
+        // let button = get_html_element_by_id::<HtmlButtonElement>(&document, "test-button");
+        // let planet_sim = state.planet_sim.clone();
+        // let button_onclick = move || {
+        //     error!("Button Clicked!! {:?}", &planet_sim.lock().unwrap().get_focused().unwrap().label);
+        // };
+        // register_js_callback(&button, HtmlElement::set_onclick, button_onclick);
 
-        // timescale adjuster
-        let timescale_input = get_html_element_by_id::<HtmlInputElement>(&document, "dt-input");
+        // // timescale adjuster
+        // let timescale_input = get_html_element_by_id::<HtmlInputElement>(&document, "dt-input");
+        // let sec_per_sec = state.sec_per_sec.clone();
+        // let timescale_onchange = move |event: web_sys::Event| {
+        //     let target = event.target().unwrap();
+        //     let input_element = target.dyn_into::<HtmlInputElement>().unwrap();
+        //     let value = input_element.value();
+        //     if let Ok(dt) = value.parse::<u32>() {
+        //         *sec_per_sec.lock().unwrap() = dt;
+        //         error!("New timescale: {}sec/sec", dt);
+        //     } else {
+        //         error!("{} is not a valid timescale", value);
+        //     }
+        // };
+        // register_js_callback_with_event(&timescale_input, HtmlElement::set_onchange, timescale_onchange);
+
+        // add the timescale slider callback
+        let timescale_slider = get_html_element_by_id::<HtmlInputElement>(&document, "timescale-slider");
         let sec_per_sec = state.sec_per_sec.clone();
         let timescale_onchange = move |event: web_sys::Event| {
             let target = event.target().unwrap();
-            let input_element = target.dyn_into::<HtmlInputElement>().unwrap();
-            let value = input_element.value();
-            if let Ok(dt) = value.parse::<u32>() {
-                *sec_per_sec.lock().unwrap() = dt;
-                error!("New timescale: {}sec/sec", dt);
-            } else {
-                error!("{} is not a valid timescale", value);
-            }
+            let slider_element = target.dyn_into::<HtmlInputElement>().unwrap();
+            let value = slider_element.value();
+
+            // set the new timescale value
+            let exp_base: f64 = 1.22712523985;
+            let coeff: f64 = 1.29154966501;
+            if let Ok(dt) = value.parse::<f32>() {
+                if dt <= 10.0 {
+                    *sec_per_sec.lock().unwrap() = dt as u32;
+                } else {
+                    *sec_per_sec.lock().unwrap() = (coeff * exp_base.powf(dt as f64)) as u32;
+                }
+            } 
+
+            let document = get_web_document();
+            let timescale_display = get_html_element_by_id::<HtmlLabelElement>(&document, "timescale-display");
+            timescale_display.set_inner_text(&formatted_secs(*sec_per_sec.lock().unwrap()));
         };
-        register_js_callback_with_event(&timescale_input, HtmlElement::set_onchange, timescale_onchange);
+        register_js_callback_with_event(&timescale_slider, HtmlElement::set_oninput, timescale_onchange);
     } 
 
     event_loop.run(move |event, control_flow| {

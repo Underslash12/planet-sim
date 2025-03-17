@@ -10,33 +10,90 @@
     <style>
         body {
             display: flex;
+            height: 100vh;
             margin: 0;
-            padding: 0;
+            background-color: #222;
+            font-family: sans-serif;
+        }
+        #planet-sim {
+            flex: 4;
+            background-color: #111;
+            margin: 15px;
+            border-radius: 10px;
+            max-width: 2048px;
+            max-height: 2048px;
         }
         canvas {
             background-color: black;
-            flex: 4;
-            height: 100vh;
+            /* height: 100vh; */
             margin: 0;
             padding: 0;
+            height: 100%;
+            width: 100%;
             max-width: 2048px;
             max-height: 2048px;
+            border-radius: 10px;
         }
         /* add the following to disable the select outline */
         canvas:focus, canvas:active {
             outline: none;
         }
-
-        #control-panel {
+        #controls {
             flex: 1;
-            height: 100vh;
-            margin: 0;
-            padding: 0;
+            margin: 15px;
+            padding: 10px;
+            background-color: #222;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .row input, .row button, .row select {
+            flex: none;
+            width: auto;
+        }
+        .row input[type="text"] {
+            width: 80px;
+            background-color: #333;
+            color: white;
+            border: 1px solid #333;
+            padding: 5px;
+            border-radius: 5px;
+        }
+        .row input[type="text"]:focus {
+            background-color: #555;
+            outline: none;
+        }
+        .indented {
+            margin-left: 20px;
+        }
+        .vertical-space {
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }
+        .delete-button {
+            margin-top: 15px;
+            border: none;
+            border-radius: 5px;
+            padding: 10px;
+            width: auto;
+            background-color: rgb(228, 64, 64);
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .aligned-label {
+            width: 60px;
         }
     </style>
 </head>
 
-<body id="planet-sim">
+<body>
     <script type="module">
         console.log("Loaded js");
         import init from "./pkg/planet_sim.js";
@@ -44,9 +101,39 @@
             console.log("WASM Loaded");
         });
     </script>
-    <div id="control-panel">
-        <button id="test-button" onclick="testClick()">Test Button</button>
-        <input id="dt-input">
+    <div id="planet-sim"></div>
+    <div id="controls">
+        <div class="row"><label>Time:</label> <span id="time-value">12:00</span></div>
+        
+        <div class="row">
+            <label>Timescale:</label>
+            <input id="timescale-slider" type="range" min="0" max="100" step="0.1" value="0" autocomplete=off>
+            <label id="timescale-display">1 sec/sec</label>
+        </div>
+        
+        <div class="row">
+            <label>Astronomical Body:</label>
+            <button>&lt;</button>
+            <input id="focus-selector" type="text" value="Earth">
+            <button>&gt;</button>
+            <button>Add</button>
+        </div>
+        
+        <div class="indented">
+            <div class="row"><label class="aligned-label">Name:</label> <input id="planet-name" type="text"></div>
+            <div class="row"><label class="aligned-label">Mass:</label> <input id="planet-mass" type="text"> <label>× 10<sup>24</sup> kg</label></div>
+            <div class="row"><label class="aligned-label">Radius:</label> <input id="planet-radius" type="text"> <label>× 10<sup>3</sup> km</label></div>
+            <div class="row"><label class="vertical-space">Position (in km):</label></div>
+            <div class="row"><label class="aligned-label"></label><input id="planet-pos-x" type="text"> <input id="planet-pos-y" type="text"> <input id="planet-pos-z" type="text"></div>
+            <div class="row"><label class="vertical-space">Velocity (in km/sec):</label></div>
+            <div class="row"><label class="aligned-label"></label><input id="planet-vel-x" type="text"> <input id="planet-vel-y" type="text"> <input id="planet-vel-z" type="text"></div>
+            <div class="row"><label class="aligned-label">Color:</label> <input id="planet-color-r" type="text"> <input id="planet-color-g" type="text"> <input id="planet-color-b" type="text"> <input id="planet-color-a" type="text"></div>
+            <div class="row"><label>Texture Index:</label> <input id="planet-texture-index" type="text"></div>
+            <button class="delete-button">Delete Body</button>
+        </div>
+
+        <!-- <button id="test-button" onclick="testClick()">Test Button</button>
+        <input id="dt-input"> -->
     </div>
 </body>
 

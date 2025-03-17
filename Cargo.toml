@@ -49,5 +49,6 @@ web-sys = { version = "0.3", features = [
     "HtmlInputElement",
     "HtmlElement",
     "Location",
+    "HtmlLabelElement",
 ]}
 reqwest = { version = "0.11" }
