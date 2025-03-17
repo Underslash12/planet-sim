@@ -22,56 +22,44 @@ fn format_url(file_name: &str) -> reqwest::Url {
 }
 
 pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
-    // cfg_if! {
-    //     if #[cfg(target_arch = "wasm32")] {
-    //         let url = format_url(file_name);
-    //         let txt = reqwest::get(url)
-    //             .await?
-    //             .text()
-    //             .await?;
-    //     } else {
-    //         // let path = std::path::Path::new(env!("OUT_DIR"))
-    //         let path = std::path::Path::new(".\\")
-    //             .join("resources")
-    //             .join(file_name);
-    //         // println!("{:?}", path);
-    //         let txt = std::fs::read_to_string(path)?;
-    //     }
-    // }
-
-    let path = std::path::Path::new(".\\")
-        .join("assets")
-        .join(file_name);
-    // println!("{:?}", path);
-    let txt = std::fs::read_to_string(path)?;
+    cfg_if! {
+        if #[cfg(target_arch = "wasm32")] {
+            let url = format_url(file_name);
+            let txt = reqwest::get(url)
+                .await?
+                .text()
+                .await?;
+        } else {
+            // let path = std::path::Path::new(env!("OUT_DIR"))
+            let path = std::path::Path::new(".\\")
+                .join("assets")
+                .join(file_name);
+            // println!("{:?}", path);
+            let txt = std::fs::read_to_string(path)?;
+        }
+    }
 
     Ok(txt)
 }
 
 pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
-    // cfg_if! {
-    //     if #[cfg(target_arch = "wasm32")] {
-    //         let url = format_url(file_name);
-    //         let data = reqwest::get(url)
-    //             .await?
-    //             .bytes()
-    //             .await?
-    //             .to_vec();
-    //     } else {
-    //         // let path = std::path::Path::new(env!("OUT_DIR"))
-    //         let path = std::path::Path::new(".\\")
-    //             .join("resources")
-    //             .join(file_name);
-    //         // println!("{:?}", path);
-    //         let data = std::fs::read(path)?;
-    //     }
-    // }
-
-    let path = std::path::Path::new(".\\")
-        .join("assets")
-        .join(file_name);
-    // println!("{:?}", path);
-    let data = std::fs::read(path)?;
+    cfg_if! {
+        if #[cfg(target_arch = "wasm32")] {
+            let url = format_url(file_name);
+            let data = reqwest::get(url)
+                .await?
+                .bytes()
+                .await?
+                .to_vec();
+        } else {
+            // let path = std::path::Path::new(env!("OUT_DIR"))
+            let path = std::path::Path::new(".\\")
+                .join("assets")
+                .join(file_name);
+            // println!("{:?}", path);
+            let data = std::fs::read(path)?;
+        }
+    }
 
     Ok(data)
 }
