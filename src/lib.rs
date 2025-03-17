@@ -553,18 +553,18 @@ impl<'a> State<'a> {
         // load the planet texture array
         let texture_array = resources::load_texture_array(
             &[
-                "textures/2k_stars_milky_way.jpg",
-                "textures/2k_sun.jpg",   
-                "textures/2k_mercury.jpg",  
-                "textures/2k_venus_atmosphere.jpg",
-                "textures/2k_earth_daymap.jpg", 
-                "textures/2k_moon.jpg",
-                "textures/2k_mars.jpg", 
-                "textures/2k_jupiter.jpg", 
-                "textures/2k_saturn.jpg", 
-                "textures/2k_uranus.jpg", 
-                "textures/2k_neptune.jpg", 
-                "textures/2k_pluto.jpg",
+                "/assets/textures/2k_stars_milky_way.jpg",
+                "/assets/textures/2k_sun.jpg",   
+                "/assets/textures/2k_mercury.jpg",  
+                "/assets/textures/2k_venus_atmosphere.jpg",
+                "/assets/textures/2k_earth_daymap.jpg", 
+                "/assets/textures/2k_moon.jpg",
+                "/assets/textures/2k_mars.jpg", 
+                "/assets/textures/2k_jupiter.jpg", 
+                "/assets/textures/2k_saturn.jpg", 
+                "/assets/textures/2k_uranus.jpg", 
+                "/assets/textures/2k_neptune.jpg", 
+                "/assets/textures/2k_pluto.jpg",
             ], 
             &device, &queue, "planet_texture_array"
         ).await.unwrap();
@@ -652,7 +652,7 @@ impl<'a> State<'a> {
         });
         
         // load the sphere mesh
-        let sphere_mesh = resources::load_mesh("models/sphere_mesh_high_quality.obj", &device, &queue, &texture_array_bind_group_layout)
+        let sphere_mesh = resources::load_mesh("/assets/models/sphere_mesh_high_quality.obj", &device, &queue, &texture_array_bind_group_layout)
             .await.unwrap();
         // store the texture array in a material
         let planet_textures = model::Material {
