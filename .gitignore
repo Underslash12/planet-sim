@@ -3,16 +3,12 @@
 /pkg
 
 # for now, ignore images
-*.png
-*.jpg
-/images
 
 # also ignore text files
 *.txt
 *.csv
 
 # and 3d files
-*.obj
 *.blend
 /res
 /resources
