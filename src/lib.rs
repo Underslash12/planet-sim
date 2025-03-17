@@ -450,20 +450,20 @@ struct State<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     surface: wgpu::Surface<'a>,
     config: wgpu::SurfaceConfiguration,
-    device: wgpu::Device,
+    device: Arc<Mutex<wgpu::Device>>,
     queue: wgpu::Queue,
     camera: Camera,
     camera_controller: CameraController,
     camera_uniform: CameraUniform,
     camera_bind_group: wgpu::BindGroup,
-    camera_buffer: wgpu::Buffer,
+    camera_buffer: Buffer,
     sphere_mesh: model::Mesh,
     planet_textures: model::Material,
-    planet_instance_buffer: wgpu::Buffer,
+    planet_instance_buffer: Arc<Mutex<Buffer>>,
     skysphere_instance: AstroBody,
-    skysphere_instance_buffer: wgpu::Buffer,
+    skysphere_instance_buffer: Buffer,
     point_vertices: Vec<PointVertex>,
-    point_vertex_buffer: Buffer,
+    point_vertex_buffer: Arc<Mutex<Buffer>>,
     depth_texture: texture::Texture,
     render_pipelines: Vec<wgpu::RenderPipeline>,
     planet_sim: Arc<Mutex<PlanetSim>>,
@@ -805,7 +805,7 @@ impl<'a> State<'a> {
             size,
             surface,
             config,
-            device,
+            device: Arc::new(Mutex::new(device)),
             queue,
             camera,
             camera_controller,
@@ -814,11 +814,11 @@ impl<'a> State<'a> {
             camera_buffer,
             sphere_mesh,
             planet_textures,
-            planet_instance_buffer,
+            planet_instance_buffer: Arc::new(Mutex::new(planet_instance_buffer)),
             skysphere_instance,
             skysphere_instance_buffer,
             point_vertices,
-            point_vertex_buffer,
+            point_vertex_buffer: Arc::new(Mutex::new(point_vertex_buffer)),
             // diffuse_bind_group: wgpu::BindGroup,
             // diffuse_texture: texture::Texture,
             depth_texture,
@@ -910,9 +910,9 @@ impl<'a> State<'a> {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.camera.aspect = self.config.width as f32 / self.config.height as f32;
-            self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+            self.depth_texture = texture::Texture::create_depth_texture(&self.device.lock().unwrap(), &self.config, "depth_texture");
 
-            self.surface.configure(&self.device, &self.config);
+            self.surface.configure(&self.device.lock().unwrap(), &self.config);
         }
     }
 
@@ -943,7 +943,7 @@ impl<'a> State<'a> {
         // update the planet instances
         self.planet_sim.lock().unwrap().update(*self.sec_per_sec.lock().unwrap() * self.frame_counter.clamped_delta_time());
         let planet_instance_data = self.planet_sim.lock().unwrap().instance_data();
-        self.queue.write_buffer(&self.planet_instance_buffer, 0, bytemuck::cast_slice(&planet_instance_data));
+        self.queue.write_buffer(&self.planet_instance_buffer.lock().unwrap(), 0, bytemuck::cast_slice(&planet_instance_data));
 
         // update point vertex positions
         {
@@ -953,7 +953,7 @@ impl<'a> State<'a> {
                 .map(|obj| point_vertex_from_astro_body(obj, ps.render_scale))
                 .collect::<Vec<PointVertex>>();
         }
-        self.queue.write_buffer(&self.point_vertex_buffer, 0, bytemuck::cast_slice(&self.point_vertices));
+        self.queue.write_buffer(&self.point_vertex_buffer.lock().unwrap(), 0, bytemuck::cast_slice(&self.point_vertices));
     }
 
     // render whatever needs to be rendered onto the surface
@@ -963,7 +963,7 @@ impl<'a> State<'a> {
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         
         // create the command encoder (to encode commands to be sent to the gpu)
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut encoder = self.device.lock().unwrap().create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Render Encoder"),
         });
         
@@ -1043,7 +1043,7 @@ impl<'a> State<'a> {
 
             // point render pass
             point_render_pass.set_pipeline(&self.render_pipelines[1]); 
-            point_render_pass.set_vertex_buffer(0, self.point_vertex_buffer.slice(..));
+            point_render_pass.set_vertex_buffer(0, self.point_vertex_buffer.lock().unwrap().slice(..));
             point_render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             point_render_pass.draw(0..self.point_vertices.len() as u32, 0..1);
         }
@@ -1084,7 +1084,7 @@ impl<'a> State<'a> {
             render_pass.set_bind_group(1, &self.planet_textures.bind_group, &[]);
             
             // draw the instanced planet meshes
-            render_pass.set_vertex_buffer(1, self.planet_instance_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.planet_instance_buffer.lock().unwrap().slice(..));
             let instances = self.planet_sim.lock().unwrap().len() as u32;
             render_pass.draw_indexed(0..self.sphere_mesh.num_elements, 0, 0..instances);
         }
@@ -1437,6 +1437,98 @@ pub async fn run() {
 
         // register all the callbacks for editing the input fields
         register_focused_planet_input_onchange(&document, &state);
+
+        // onclick create planet
+        let add_planet_button = get_html_element_by_id::<HtmlButtonElement>(&document, "add-planet");
+        let planet_sim = state.planet_sim.clone();
+        let planet_instance_buffer = state.planet_instance_buffer.clone();
+        let point_vertex_buffer = state.point_vertex_buffer.clone();
+        let device = state.device.clone();
+        let add_planet_onclick = move || {
+            let mut ps = planet_sim.lock().unwrap();
+            
+            // want to make sure it creates a unique planet name for each new planet
+            let mut name_index = 0;
+            loop {
+                let mut seen = false;
+                for obj in &ps.objects {
+                    if obj.label == format!("New{}", name_index) {
+                        seen = true;
+                        break
+                    }
+                }
+                if seen {
+                    name_index += 1;
+                    continue;
+                }
+                break;
+            }
+            let new_name = format!("New{}", name_index);
+            ps.add(AstroBody {
+                label: new_name.clone(),
+                ..Default::default()
+            });
+            ps.set_focused(Some(&new_name));
+            set_focused_planet_input(&new_name);
+
+            // rebuild planet buffers
+            let mut pib = planet_instance_buffer.lock().unwrap();
+            let planet_instance_data = ps.instance_data();
+            *pib = device.lock().unwrap().create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("AstroBody Instance Buffer"),
+                    contents: bytemuck::cast_slice(&planet_instance_data),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                }
+            );
+            let mut pvb = point_vertex_buffer.lock().unwrap();
+            let x = (0..(std::mem::size_of::<PointVertex>() * ps.len())).into_iter().map(|_| 0).collect::<Vec<u8>>();
+            *pvb = device.lock().unwrap().create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("AstroBody Instance Buffer"),
+                    contents: &x,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                }
+            );            
+        };
+        register_js_callback(&add_planet_button, HtmlElement::set_onclick, add_planet_onclick);
+
+        // onclick remove planet
+        let remove_planet_button = get_html_element_by_id::<HtmlButtonElement>(&document, "delete-planet");
+        let planet_sim = state.planet_sim.clone();
+        let planet_instance_buffer = state.planet_instance_buffer.clone();
+        let point_vertex_buffer = state.point_vertex_buffer.clone();
+        let device = state.device.clone();
+        let remove_planet_onclick = move || {
+            let mut ps = planet_sim.lock().unwrap();
+
+            if ps.len() >= 2 {
+                let remove_label = ps.get_focused().unwrap().label.clone();
+                ps.remove(&remove_label, Some("Sun"), true);
+            }
+            set_focused_planet_input(&ps.get_focused().unwrap().label);
+            
+            // rebuild planet buffers
+            let mut pib = planet_instance_buffer.lock().unwrap();
+            let planet_instance_data = ps.instance_data();
+            *pib = device.lock().unwrap().create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("AstroBody Instance Buffer"),
+                    contents: bytemuck::cast_slice(&planet_instance_data),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                }
+            );
+            let mut pvb = point_vertex_buffer.lock().unwrap();
+            let x = (0..(std::mem::size_of::<PointVertex>() * ps.len())).into_iter().map(|_| 0).collect::<Vec<u8>>();
+            *pvb = device.lock().unwrap().create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("AstroBody Instance Buffer"),
+                    contents: &x,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                }
+            );            
+        };
+        register_js_callback(&remove_planet_button, HtmlElement::set_onclick, remove_planet_onclick);
     } 
 
     event_loop.run(move |event, control_flow| {

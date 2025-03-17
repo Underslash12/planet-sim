@@ -27,11 +27,11 @@ impl Default for AstroBody {
         AstroBody {
             label: String::from("default_astrobody"),
             texture_index: 0,
-            color: [0.0, 0.0, 0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
             mass: 1.0,
-            radius: 1.0,
-            position: Vector3::zero(),
-            velocity: Vector3::zero(),
+            radius: 1000.0,
+            position: Vector3::unit_x(),
+            velocity: Vector3::unit_x(),
             rotation: Quaternion::zero(),
             axis_of_rotation: Vector3::zero(),
             angular_velocity: 0.0,
@@ -131,7 +131,16 @@ impl PlanetSim {
     // removes the object associated with label from the sim
     // if it was the focused object, then sets the focused object to the default parameter if possible
     // if the focused object is none, it isn't replaced by the default
-    pub fn remove(&mut self, label: &str, default_focus: Option<&str>) {
+    // if force is true, it focuses new 0th planet
+    pub fn remove(&mut self, label: &str, default_focus: Option<&str>, force: bool) {
+        let old_focus_label: Option<String> = {
+            if let Some(obj) = self.get_focused() {
+                Some(obj.label.clone())
+            } else {
+                None
+            }
+        };
+        
         // remove the associated label 
         for i in 0..self.len() {
             if self.objects[i].label == label {
@@ -141,11 +150,14 @@ impl PlanetSim {
         }
         
         // set the new focus after removing to keep the indices consistent
-        if let Some(old_focus) = self.get_focused() {
-            if old_focus.label == label {
-                self.set_focused(default_focus); 
+        if let Some(old_focus_label) = old_focus_label {
+            if old_focus_label == label {
+                if !self.set_focused(default_focus) && force {
+                    let forced_label = String::from(&self.objects[0].label);
+                    self.set_focused(Some(&forced_label));
+                } 
             } else {
-                self.set_focused(Some(&(old_focus.label.clone())));
+                self.set_focused(Some(&old_focus_label));
             }
         }   
     }
@@ -170,19 +182,22 @@ impl PlanetSim {
         }
     }
 
-    pub fn set_focused(&mut self, label: Option<&str>) {
+    // returns whether or not it failed to set it, which is only if the str isnt a valid label
+    pub fn set_focused(&mut self, label: Option<&str>) -> bool {
         match label {
             Some(new_label) => {
                 for i in 0..self.len() {
                     if self.objects[i].label == new_label {
                         self.focused_index = Some(i);
-                        return;
+                        return true;
                     } 
                 }
                 self.focused_index = None;
+                return false;
             },
             None => self.focused_index = None,
         }
+        return true;
     }
 
     // the timestep is time between updating in the simulation (which could be anywhere from milliseconds to years), not necessarily time between frames
