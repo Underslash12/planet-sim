@@ -2,9 +2,9 @@
 /target
 /pkg
 
-
-# also ignore text files
 *.txt
 
-# and 3d files
+# ignore blender files
 *.blend
+*.blend1
+*.blend2
