@@ -9,11 +9,36 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    permissions:
+      # repository write permissions
+      contents: write
+
     steps:
       - name: Checkout main
         uses: actions/checkout@v4.2.2 
         with: 
           ref: 'main'
+    
+      - name: Checkout new branch
+        run: git checkout -B gh-pages
+          
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
 
-      - name: Test
-        run: cat ./planet-sim/Cargo.toml
+      - name: Run wasm-pack
+        run: wasm-pack build --target web
+
+      - name: Update gitignore to not include pkg
+        run: sed -i '/\/pkg/d' .gitignore
+
+      - name: Delete pkg gitignore
+        run: rm pkg/.gitignore
+
+      - name: Commit to gh-pages branch
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with: 
+          skip_fetch: true
+          branch: gh-pages
+          create_branch: true
+          push_options: '--force'
+          
