@@ -1,0 +1,15 @@
+{
+  "name": "planet_sim",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "planet_sim_bg.wasm",
+    "planet_sim.js",
+    "planet_sim.d.ts"
+  ],
+  "main": "planet_sim.js",
+  "types": "planet_sim.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
