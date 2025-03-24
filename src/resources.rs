@@ -15,9 +15,10 @@ use crate::{model, texture};
 fn format_url(file_name: &str) -> reqwest::Url {
     let window = web_sys::window().unwrap();
     let location = window.location();
-    let mut origin = location.origin().unwrap();
+    let origin = location.origin().unwrap();
+    let pathname = location.pathname().unwrap();
     // error!("Location: {:?}, File_name: {:?}", origin, file_name);
-    let base = reqwest::Url::parse(&format!("{}/assets/", origin,)).unwrap();
+    let base = reqwest::Url::parse(&format!("{}{}/assets/", origin, pathname)).unwrap();
     base.join(file_name).unwrap()
 }
 
